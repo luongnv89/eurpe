@@ -1,0 +1,24 @@
+# Unknown-status chunk from an "other" programme — covers the case where a
+# document is ingested before its outcome has been confirmed.
+# Used by test_chunk_metadata_round_trips_all_fixtures.
+proposal:
+  programme: other
+  call_id: NATIONAL-FR-2022-CYBER
+  topic_id: null
+  year: 2022
+  outcome: unknown
+  proposal_title: National cyber range pilot (status pending)
+  consortium_acronym: null
+  source_path: data/corpus/unsorted/national_cyber_range_part_b.pdf
+  language: en
+  ingested_at: 2025-01-15T09:33:00+00:00
+section_type: other
+parent_section_heading: null
+chunk_index: 7
+anchor:
+  document_id: national_cyber_range_part_b
+  section_heading: null
+  page: null
+  char_start: null
+  char_end: null
+source_status: unknown

@@ -1,0 +1,24 @@
+# ESR (External Subject Reviewer) note attached to a Horizon Europe Excellence
+# section. ESR notes are advisory commentary, never ground truth.
+# Used by test_chunk_metadata_round_trips_all_fixtures.
+proposal:
+  programme: horizon_europe
+  call_id: HORIZON-CL3-2023-CS-01
+  topic_id: HORIZON-CL3-2023-CS-01-02
+  year: 2023
+  outcome: esr_note
+  proposal_title: "ESR notes on: Quantum-Safe Authentication for Critical Infrastructure"
+  consortium_acronym: QSA-CI
+  source_path: data/corpus/esr/qsa_ci_esr_summary.pdf
+  language: en
+  ingested_at: 2025-01-15T09:32:00+00:00
+section_type: excellence
+parent_section_heading: "1.1 Objectives and ambition (ESR commentary)"
+chunk_index: 0
+anchor:
+  document_id: qsa_ci_esr_summary
+  section_heading: "ESR comments — Excellence"
+  page: 2
+  char_start: 0
+  char_end: 1820
+source_status: esr_note

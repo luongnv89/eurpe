@@ -1,0 +1,23 @@
+# Funded Horizon Europe proposal — Methodology subsection chunk.
+# Used by test_chunk_metadata_round_trips_all_fixtures.
+proposal:
+  programme: horizon_europe
+  call_id: HORIZON-CL5-2024-D3-02
+  topic_id: HORIZON-CL5-2024-D3-02-01
+  year: 2024
+  outcome: funded
+  proposal_title: Edge AI for Resilient Energy Grids
+  consortium_acronym: EAGER
+  source_path: data/corpus/funded/eager_part_b.pdf
+  language: en
+  ingested_at: 2025-01-15T09:30:00+00:00
+section_type: methodology
+parent_section_heading: "1.2 Methodology"
+chunk_index: 12
+anchor:
+  document_id: eager_part_b
+  section_heading: "1.2 Methodology"
+  page: 8
+  char_start: 14250
+  char_end: 15800
+source_status: funded
