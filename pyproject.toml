@@ -30,6 +30,10 @@ dependencies = [
     "fastapi>=0.110",
     "uvicorn[standard]>=0.27",
     "typer>=0.12",
+    # Docling is the proposal PDF parser (see eurpe.ingestion). Pinned to
+    # the 2.x line; let the venv resolve the exact compatible torch /
+    # huggingface-hub / numpy versions.
+    "docling>=2.0,<3.0",
 ]
 
 [project.optional-dependencies]
@@ -37,6 +41,10 @@ dev = [
     "pytest>=8.0",
     "pytest-cov>=4.1",
     "ruff>=0.4",
+    # Used only by the synthetic-PDF integration test to generate a tiny
+    # PDF on the fly. Listed under [dev] so production installs don't pull
+    # it; the test gracefully skips if it isn't present.
+    "reportlab>=4.0",
 ]
 
 [project.scripts]
@@ -61,7 +69,12 @@ select = [
     "UP",  # pyupgrade
     "W",   # pycodestyle warnings
 ]
-ignore = []
+# B008 fires on Typer's idiomatic ``Argument()`` / ``Option()`` calls in
+# parameter defaults (see ``eurpe.cli:smoke`` and ``eurpe.ingestion.cli:ingest``).
+# Typer's whole CLI declaration model relies on this pattern; rewriting every
+# command to lift the calls into module-level constants buys nothing in
+# correctness and noisier diffs. Project-wide ignore documents the convention.
+ignore = ["B008"]
 
 [tool.ruff.format]
 quote-style = "double"
@@ -71,3 +84,9 @@ indent-style = "space"
 minversion = "8.0"
 testpaths = ["tests"]
 addopts = "-ra --strict-markers"
+# ``--strict-markers`` is enabled above, so any custom marker MUST be
+# registered here or every test run errors. ``docling`` covers integration
+# tests that import docling and may download model weights on first run.
+markers = [
+    "docling: integration tests that require docling and may download model weights",
+]
