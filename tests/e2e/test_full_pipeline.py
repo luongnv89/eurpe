@@ -98,14 +98,12 @@ def test_full_pipeline(pdf_path: Path, tmp_path: Path) -> None:
 
     # AC4 — parsed chunks > 0.
     assert artefacts["chunk_count"] > 0, (
-        f"index build reported 0 chunks for {pdf_path}:\n"
-        f"{artefacts['build_output']}"
+        f"index build reported 0 chunks for {pdf_path}:\n{artefacts['build_output']}"
     )
 
     # AC4 — index populated.
     assert artefacts["collection_count"] > 0, (
-        f"collection count was 0 after build for {pdf_path}:\n"
-        f"{artefacts['build_output']}"
+        f"collection count was 0 after build for {pdf_path}:\n{artefacts['build_output']}"
     )
 
     # AC4 — retrieval returned results. The proof that retrieval ran is
@@ -116,9 +114,9 @@ def test_full_pipeline(pdf_path: Path, tmp_path: Path) -> None:
     # retriever. A future improvement could parametrise the probe per
     # fixture so the hit-count assertion can tighten to ``>= 1``.
     assert artefacts["query_output"], "query CLI produced no output"
-    assert (
-        "(no results)" in artefacts["query_output"] or artefacts["query_hits"] >= 1
-    ), f"query output unexpected:\n{artefacts['query_output']}"
+    assert "(no results)" in artefacts["query_output"] or artefacts["query_hits"] >= 1, (
+        f"query output unexpected:\n{artefacts['query_output']}"
+    )
 
     # AC4 — at least one section generated. The generate CLI wrote both
     # forms because run_full_pipeline uses ``--render both``.
@@ -126,9 +124,7 @@ def test_full_pipeline(pdf_path: Path, tmp_path: Path) -> None:
     json_path: Path = artefacts["generated_json_path"]
     assert md_path.exists(), f"missing rendered Markdown: {md_path}"
     md_text = md_path.read_text(encoding="utf-8")
-    assert "# " in md_text, (
-        f"rendered Markdown has no heading marker:\n{md_text[:500]}"
-    )
+    assert "# " in md_text, f"rendered Markdown has no heading marker:\n{md_text[:500]}"
 
     assert json_path.exists(), f"missing rendered JSON: {json_path}"
     payload = json.loads(json_path.read_text(encoding="utf-8"))

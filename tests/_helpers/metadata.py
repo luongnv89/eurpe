@@ -24,7 +24,6 @@ from typing import Any
 
 import yaml
 
-
 # Default values applied when no sibling YAML exists. Chosen to be the
 # safest possible: ``unspecified-call``-ish call_id, ``funded`` outcome
 # (because the retrieval policy treats funded as the primary positive
@@ -78,9 +77,7 @@ def load_or_synthesise_metadata(pdf_path: Path) -> dict[str, Any]:
             if not isinstance(raw, dict):
                 # The build CLI would error on this; surface it now with
                 # a helpful message instead of a deep-stack Pydantic crash.
-                raise ValueError(
-                    f"{sibling}: expected a YAML mapping at the document root"
-                )
+                raise ValueError(f"{sibling}: expected a YAML mapping at the document root")
             # Force ``source_path`` to the absolute PDF path. The sibling
             # may carry a relative path that only resolves from the
             # original directory; the E2E pipeline stages the YAML into

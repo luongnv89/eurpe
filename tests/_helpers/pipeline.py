@@ -35,7 +35,6 @@ from typing import Any
 from typer.testing import CliRunner
 
 from eurpe.cli import app
-
 from tests._helpers.metadata import write_metadata_yaml
 
 # Regex for the ``index build`` summary line:
@@ -43,9 +42,7 @@ from tests._helpers.metadata import write_metadata_yaml
 _CHUNK_COUNT_RE = re.compile(r"ingested\s+\S+\s*:\s*(\d+)\s+chunks", re.IGNORECASE)
 
 # Regex for the ``Done. <N> chunks added; collection 'X' now holds <M>.``
-_COLLECTION_COUNT_RE = re.compile(
-    r"collection\s+\S+\s+now holds\s+(\d+)", re.IGNORECASE
-)
+_COLLECTION_COUNT_RE = re.compile(r"collection\s+\S+\s+now holds\s+(\d+)", re.IGNORECASE)
 
 
 def _append_log(log_path: Path, header: str, output: str) -> None:
@@ -173,9 +170,7 @@ def run_full_pipeline(
     chunk_count_match = _CHUNK_COUNT_RE.search(build_result.output)
     chunk_count = int(chunk_count_match.group(1)) if chunk_count_match else 0
     collection_count_match = _COLLECTION_COUNT_RE.search(build_result.output)
-    collection_count = (
-        int(collection_count_match.group(1)) if collection_count_match else 0
-    )
+    collection_count = int(collection_count_match.group(1)) if collection_count_match else 0
 
     # ----- 3. index query -----
     query_result = runner.invoke(
