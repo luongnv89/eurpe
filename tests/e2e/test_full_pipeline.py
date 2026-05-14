@@ -108,13 +108,17 @@ def test_full_pipeline(pdf_path: Path, tmp_path: Path) -> None:
         f"{artefacts['build_output']}"
     )
 
-    # AC4 — retrieval returned results (the query CLI exited 0, captured
-    # inside run_full_pipeline as a raise-on-non-zero). We additionally
-    # assert ``query_hits >= 0`` to document the intent without
-    # over-constraining: deterministic-hash embeddings may not surface a
-    # match for a generic probe, but the *path* through the retriever
-    # ran. A future improvement could parametrise the probe per fixture.
-    assert artefacts["query_hits"] >= 0
+    # AC4 — retrieval returned results. The proof that retrieval ran is
+    # the query CLI's exit code 0 (run_full_pipeline raises on non-zero).
+    # Beyond that, we accept either ``(no results)`` (the deterministic
+    # embedder might not match a generic probe well) or at least one
+    # ``#N`` ranked row — both are valid CLI outputs from a working
+    # retriever. A future improvement could parametrise the probe per
+    # fixture so the hit-count assertion can tighten to ``>= 1``.
+    assert artefacts["query_output"], "query CLI produced no output"
+    assert (
+        "(no results)" in artefacts["query_output"] or artefacts["query_hits"] >= 1
+    ), f"query output unexpected:\n{artefacts['query_output']}"
 
     # AC4 — at least one section generated. The generate CLI wrote both
     # forms because run_full_pipeline uses ``--render both``.
