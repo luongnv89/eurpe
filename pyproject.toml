@@ -34,6 +34,18 @@ dependencies = [
     # the 2.x line; let the venv resolve the exact compatible torch /
     # huggingface-hub / numpy versions.
     "docling>=2.0,<3.0",
+    # Chroma is the local-only vector store used by eurpe.retrieval. The
+    # 1.x line is required because 0.5.x pulls a tokenizers wheel that
+    # cannot build on Python 3.14 (PyO3 < 0.23). 1.x ships its embedding
+    # path lazily, so we can pass ``embedding_function=None`` and stay
+    # fully offline (we supply our own vectors). Telemetry is disabled at
+    # client-construction time in ``eurpe.retrieval.index``.
+    "chromadb>=1.0,<2.0",
+    # httpx is used by ``eurpe.retrieval.embeddings.OllamaEmbedder`` to
+    # talk to the local Ollama daemon. Already pulled transitively by
+    # fastapi but pinned explicitly so the embedder remains importable
+    # if fastapi's dep set ever drops it.
+    "httpx>=0.27",
 ]
 
 [project.optional-dependencies]

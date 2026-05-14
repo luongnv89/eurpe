@@ -20,6 +20,7 @@ from eurpe.config import (
     load_config,
 )
 from eurpe.ingestion.cli import ingest as ingest_command
+from eurpe.retrieval.cli import index_app
 
 app = typer.Typer(
     name="eurpe",
@@ -34,6 +35,11 @@ app = typer.Typer(
 # When ingestion grows multiple sub-actions (Issue #4 onwards), we can
 # promote this to a sub-Typer without touching the implementation.
 app.command("ingest")(ingest_command)
+
+# ``eurpe index build`` / ``eurpe index query`` live in the retrieval
+# package; mounting the sub-Typer here keeps the top-level CLI thin
+# while letting the retrieval package own its own option signature.
+app.add_typer(index_app, name="index")
 
 
 @app.command()
