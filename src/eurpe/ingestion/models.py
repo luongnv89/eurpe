@@ -73,6 +73,11 @@ class ParsedSection(BaseModel):
     deepest) so a future tree-builder can reconstruct the hierarchy. The
     prototype keeps the list flat and lets chunking (Issue #4) decide
     whether to nest.
+
+    Note: char offsets (start/end byte positions inside the original
+    document) are intentionally not modelled here. They will be added
+    when chunking lands (Issue #4) so :class:`CitationAnchor` records can
+    point at exact text spans rather than only sections + pages.
     """
 
     model_config = ConfigDict(extra="forbid")

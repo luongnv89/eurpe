@@ -13,18 +13,39 @@ tables as cell-text grids, page count) so the rest of the pipeline does not
 break every time we bump Docling. If Docling's API moves again, only this
 file changes.
 
+Offline-by-default contract
+---------------------------
+EURPE treats "no outbound traffic by default" as a release-blocking
+invariant (PRD §25 / §115; ``tests/conftest.py::no_network``). Docling's
+default OCR pipeline downloads ~40 MB of model weights from Hugging Face
+on first run, which would silently violate that contract. To keep the
+contract intact:
+
+* :class:`DoclingProposalParser` defaults to ``offline=True``, which
+  configures Docling with ``PdfPipelineOptions(do_ocr=False)`` so no
+  weights are pulled.
+* Callers that explicitly want OCR must construct the parser with
+  ``offline=False, ocr_enabled=True``. Combining ``offline=True`` with
+  ``ocr_enabled=True`` is a programming error and raises ``ValueError``
+  fail-fast at construction time.
+* Pre-cached weights (``artifacts_path``) are out of scope here; opening a
+  follow-up issue is the right path if needed.
+
 Lazy import policy
 ------------------
 ``docling`` itself is heavy: pulling it in pulls accelerate / torch /
-huggingface-hub / lxml / pillow / numpy and (on first ``parse()``) downloads
-~40 MB of OCR model weights. We import it inside :meth:`parse` rather than
-at module top so
+huggingface-hub / lxml / pillow / numpy. We import it inside :meth:`parse`
+rather than at module top so
 
 * ``import eurpe.ingestion`` stays cheap (the CLI smoke command does not
   pay the cost),
 * a developer running the model + error tests does not need the docling
   install at all (test_ingestion_models.py / test_ingestion_errors.py
-  cover those cases without touching this parser).
+  cover those cases without touching this parser),
+* ``__init__`` stays pure — pipeline-option construction happens inside
+  :meth:`parse` after the lazy import, so introspection tests can assert
+  on the resolved ``do_ocr`` boolean attribute without dragging Docling
+  into the fast suite.
 
 Failure semantics
 -----------------
@@ -60,27 +81,90 @@ class DoclingProposalParser:
     * Preserves title, headings, section boundaries, and table cell text.
     * Failures raise :class:`ParserError` and the parser writes nothing to
       disk, so partial state cannot leak into a downstream index.
+
+    Offline contract
+    ----------------
+    By default the parser runs in offline mode (``offline=True``), which
+    forces Docling's ``PdfPipelineOptions(do_ocr=False)`` so no model
+    weights are downloaded from Hugging Face. This matches the PRD's
+    "no outbound traffic by default" invariant (see module docstring).
+
+    To enable OCR, the caller MUST opt out of offline mode explicitly::
+
+        DoclingProposalParser(offline=False, ocr_enabled=True)
+
+    Combining ``offline=True`` with ``ocr_enabled=True`` is a fail-fast
+    ``ValueError`` at construction time — silently disabling OCR would
+    surprise callers expecting it to run, and silently fetching weights
+    would break the offline contract.
+
+    The wiring layer (:mod:`eurpe.ingestion.cli`) reads
+    :attr:`eurpe.config.EurpeConfig.offline_mode` and threads it through.
     """
 
     SUPPORTED_EXTENSIONS: frozenset[str] = frozenset({".pdf"})
 
-    def __init__(self, *, ocr_enabled: bool = False) -> None:
-        # ``ocr_enabled`` is recorded for future use; Docling's
-        # ``DocumentConverter`` reads its own pipeline options from the
-        # registered format options, so this prototype does not yet wire it
-        # through. Kept on the constructor so the public API does not
-        # change when the OCR toggle lands.
+    def __init__(
+        self,
+        *,
+        offline: bool = True,
+        ocr_enabled: bool = False,
+    ) -> None:
+        """Construct a parser.
+
+        Parameters
+        ----------
+        offline:
+            When ``True`` (the default), Docling is configured with
+            ``do_ocr=False`` so no OCR weights are downloaded. Mirrors
+            :attr:`eurpe.config.EurpeConfig.offline_mode`.
+        ocr_enabled:
+            When ``True``, requests Docling-driven OCR. Requires
+            ``offline=False`` because OCR weights are fetched from
+            Hugging Face on first run; combining ``offline=True`` with
+            ``ocr_enabled=True`` raises ``ValueError`` fail-fast.
+
+        Raises
+        ------
+        ValueError
+            If ``offline=True`` and ``ocr_enabled=True``.
+        """
+        if offline and ocr_enabled:
+            raise ValueError(
+                "ocr_enabled=True requires offline=False — OCR weights must be downloaded"
+            )
+        self._offline = offline
         self._ocr_enabled = ocr_enabled
+        # Resolved boolean we will pass to ``PdfPipelineOptions(do_ocr=...)``
+        # inside ``parse()``. Computed up-front so the fast introspection
+        # test can assert on it without importing Docling.
+        self._do_ocr = ocr_enabled and not offline
         # Cache the converter across calls because constructing one is
         # surprisingly expensive (it imports torch and may trigger a model
-        # download). Tests that need a fresh instance simply construct a
-        # new ``DoclingProposalParser``.
+        # download in non-offline mode). Tests that need a fresh instance
+        # simply construct a new ``DoclingProposalParser``.
         self._converter: DocumentConverter | None = None
+
+    @property
+    def offline(self) -> bool:
+        """Whether the parser was constructed in offline mode."""
+        return self._offline
 
     @property
     def ocr_enabled(self) -> bool:
         """Whether OCR was requested at construction time."""
         return self._ocr_enabled
+
+    @property
+    def do_ocr(self) -> bool:
+        """Resolved ``do_ocr`` flag passed to Docling's pipeline options.
+
+        ``True`` only when ``ocr_enabled=True`` and ``offline=False`` —
+        both must agree before Docling is allowed to download OCR weights.
+        Exposed as a property so introspection tests can assert offline
+        mode actually disables OCR without importing Docling.
+        """
+        return self._do_ocr
 
     def supports(self, path: Path) -> bool:
         """Return ``True`` if ``path``'s extension is parseable.
@@ -117,7 +201,12 @@ class DoclingProposalParser:
         # mismatch) surfaces as a ``ParserError`` rather than an
         # unhandled ``ImportError`` deep in the CLI.
         try:
-            from docling.document_converter import DocumentConverter
+            from docling.datamodel.base_models import InputFormat
+            from docling.datamodel.pipeline_options import PdfPipelineOptions
+            from docling.document_converter import (
+                DocumentConverter,
+                PdfFormatOption,
+            )
         except ImportError as exc:  # pragma: no cover - exercised manually
             raise ParserError(
                 str(path),
@@ -126,7 +215,16 @@ class DoclingProposalParser:
             ) from exc
 
         if self._converter is None:
-            self._converter = DocumentConverter()
+            # Honour the offline contract by passing explicit pipeline
+            # options. ``do_ocr=False`` avoids the ~40 MB OCR-weights
+            # download; ``do_ocr=True`` requires the caller to have opted
+            # out of offline mode (enforced in ``__init__``).
+            pdf_options = PdfPipelineOptions(do_ocr=self._do_ocr)
+            self._converter = DocumentConverter(
+                format_options={
+                    InputFormat.PDF: PdfFormatOption(pipeline_options=pdf_options),
+                }
+            )
 
         try:
             result = self._converter.convert(str(path))
@@ -286,6 +384,12 @@ class DoclingProposalParser:
         if a table has merged cells. Cells are placed by their
         ``start_row_offset_idx`` / ``start_col_offset_idx`` into a 2D
         grid sized by ``num_rows`` / ``num_cols``.
+
+        TODO(#issue-number-tbd): honour merged-cell spans
+        (``end_row_offset_idx`` / ``end_col_offset_idx``) so a
+        2-row-tall header cell appears in both rows rather than the
+        top one only. Today the grid is correct shape but ragged for
+        merged cells.
         """
 
         out: list[ParsedTable] = []

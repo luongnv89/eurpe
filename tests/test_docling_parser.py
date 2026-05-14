@@ -70,8 +70,54 @@ def test_ocr_enabled_default_is_false() -> None:
 
 
 def test_ocr_enabled_true_when_constructed_with_ocr() -> None:
-    parser = DoclingProposalParser(ocr_enabled=True)
+    # Must opt out of offline mode to combine with OCR — the offline
+    # contract treats ``offline=True + ocr_enabled=True`` as a fail-fast
+    # ValueError (see ``test_parser_offline_with_ocr_enabled_raises``).
+    parser = DoclingProposalParser(offline=False, ocr_enabled=True)
     assert parser.ocr_enabled is True
+
+
+def test_parser_offline_default_is_true() -> None:
+    """Offline mode must be ON by default — the PRD's no-network invariant."""
+
+    parser = DoclingProposalParser()
+    assert parser.offline is True
+
+
+def test_parser_offline_mode_disables_ocr() -> None:
+    """``offline=True`` must resolve ``do_ocr`` to False without importing Docling.
+
+    Asserting on the parser's resolved boolean (rather than constructing
+    a real ``PdfPipelineOptions``) keeps this test in the fast suite —
+    no Docling import, no model download, no marker required. The
+    resolved boolean is what the parser eventually passes to
+    ``PdfPipelineOptions(do_ocr=...)`` inside ``parse()``.
+    """
+
+    parser = DoclingProposalParser(offline=True)
+    assert parser.do_ocr is False
+    # Even if a caller passes ``ocr_enabled=False`` explicitly while
+    # offline, the resolved flag is still False (defence in depth).
+    parser2 = DoclingProposalParser(offline=True, ocr_enabled=False)
+    assert parser2.do_ocr is False
+    # And ``offline=False, ocr_enabled=False`` keeps OCR off — only
+    # explicitly enabling OCR while offline=False turns it on.
+    parser3 = DoclingProposalParser(offline=False, ocr_enabled=False)
+    assert parser3.do_ocr is False
+    parser4 = DoclingProposalParser(offline=False, ocr_enabled=True)
+    assert parser4.do_ocr is True
+
+
+def test_parser_offline_with_ocr_enabled_raises() -> None:
+    """``offline=True`` + ``ocr_enabled=True`` must fail fast at construction.
+
+    Silently disabling OCR would surprise callers that set the flag
+    intentionally; silently downloading weights would break the offline
+    contract. ValueError is the right "you misconfigured this" signal.
+    """
+
+    with pytest.raises(ValueError, match="OCR"):
+        DoclingProposalParser(offline=True, ocr_enabled=True)
 
 
 def test_importing_ingestion_does_not_import_docling() -> None:
@@ -235,8 +281,6 @@ def test_cli_reports_parser_error_on_missing_file(tmp_path: Path) -> None:
     missing = tmp_path / "missing.pdf"
     out_dir = tmp_path / "out"
     runner = CliRunner()
-    # ``mix_stderr=False`` keeps stderr separate so the assertion can
-    # target the exact stream we promise to write to.
     result = runner.invoke(
         app,
         ["ingest", str(missing), "--output", str(out_dir)],
@@ -263,3 +307,95 @@ def test_cli_rejects_unsupported_extension(tmp_path: Path) -> None:
     result = runner.invoke(app, ["ingest", str(bogus)])
     assert result.exit_code == 1, result.output
     assert "unsupported format" in result.output.lower()
+
+
+@pytest.mark.docling
+def test_cli_refuses_to_overwrite_existing_output(tmp_path: Path) -> None:
+    """Without ``--overwrite``, the CLI must refuse to clobber an existing parse.
+
+    Marked ``docling`` because we need a real parse to produce the
+    second-run write attempt — the ``--overwrite`` gate sits *after*
+    a successful parse (we only refuse to write, we don't refuse to
+    parse). If the gate were earlier we could test it without Docling.
+    """
+
+    pytest.importorskip(
+        "reportlab",
+        reason="reportlab not installed; synthetic PDF cannot be generated",
+    )
+
+    from typer.testing import CliRunner
+
+    from eurpe.cli import app
+
+    pdf_path = tmp_path / "synthetic-overwrite.pdf"
+    _build_synthetic_pdf(pdf_path)
+    out_dir = tmp_path / "out"
+
+    runner = CliRunner()
+
+    # First run writes the file successfully.
+    result1 = runner.invoke(
+        app, ["ingest", str(pdf_path), "--output", str(out_dir)]
+    )
+    assert result1.exit_code == 0, result1.output
+    out_file = out_dir / "synthetic-overwrite.parsed.json"
+    assert out_file.exists()
+    original_bytes = out_file.read_bytes()
+
+    # Second run must refuse — the existing file would otherwise be
+    # silently clobbered.
+    result2 = runner.invoke(
+        app, ["ingest", str(pdf_path), "--output", str(out_dir)]
+    )
+    assert result2.exit_code == 1, result2.output
+    assert "already exists" in result2.output.lower()
+    # The on-disk bytes must be unchanged (no half-written .tmp left
+    # behind either).
+    assert out_file.read_bytes() == original_bytes
+    assert not (out_dir / "synthetic-overwrite.parsed.json.tmp").exists()
+
+
+@pytest.mark.docling
+def test_cli_overwrite_flag_replaces_existing_output(tmp_path: Path) -> None:
+    """With ``--overwrite``/``-f``, the CLI must replace the existing parse.
+
+    Atomic semantics: the target file always exists during the rename
+    (no transient empty file), and any sibling ``.tmp`` is gone after
+    the run.
+    """
+
+    pytest.importorskip(
+        "reportlab",
+        reason="reportlab not installed; synthetic PDF cannot be generated",
+    )
+
+    from typer.testing import CliRunner
+
+    from eurpe.cli import app
+
+    pdf_path = tmp_path / "synthetic-overwrite-allowed.pdf"
+    _build_synthetic_pdf(pdf_path)
+    out_dir = tmp_path / "out"
+    out_file = out_dir / "synthetic-overwrite-allowed.parsed.json"
+
+    runner = CliRunner()
+
+    # Seed an obviously-bogus prior file so we can confirm the second
+    # run actually replaces the bytes, rather than accidentally leaving
+    # the seed in place.
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_file.write_text("OLD-CONTENT", encoding="utf-8")
+
+    result = runner.invoke(
+        app,
+        ["ingest", str(pdf_path), "--output", str(out_dir), "--overwrite"],
+    )
+    assert result.exit_code == 0, result.output
+    body = out_file.read_text(encoding="utf-8")
+    assert body != "OLD-CONTENT"
+    # Round-trips into a ParsedProposal — i.e. it's a real new parse,
+    # not just the seed appended to.
+    reloaded = ParsedProposal.model_validate_json(body)
+    assert reloaded.parser == "docling"
+    assert not (out_dir / "synthetic-overwrite-allowed.parsed.json.tmp").exists()

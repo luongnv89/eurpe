@@ -8,10 +8,19 @@ line. Behaviour:
 * ``eurpe ingest <pdf> --output <dir>`` additionally writes
   ``<dir>/<stem>.parsed.json`` containing the full :class:`ParsedProposal`
   serialized via Pydantic. The file is written only after a successful
-  parse — see "Failure semantics" in the docling_parser docstring.
+  parse — see "Failure semantics" in the docling_parser docstring. The
+  write is atomic (tmp + ``os.replace``) so a crash mid-write cannot
+  leave a half-formed JSON behind.
+* If the target ``.parsed.json`` already exists, the CLI refuses to
+  overwrite it unless ``--overwrite``/``-f`` is passed. Silent
+  clobbering of a previous parse is an easy data-loss footgun.
 * On :class:`UnsupportedFormatError` or :class:`ParserError`, an error
   line is printed to stderr and the process exits with code 1. No JSON
   file is produced.
+* The parser inherits :attr:`eurpe.config.EurpeConfig.offline_mode` from
+  the loaded ``config.yaml``. With ``offline_mode: true`` (the default)
+  Docling's OCR is disabled so no model weights are downloaded — see
+  ``docling_parser`` "Offline-by-default contract".
 
 The :func:`ingest` function is registered onto the top-level ``eurpe``
 Typer in :mod:`eurpe.cli` as a flat command — see that module for the
@@ -27,6 +36,12 @@ from pathlib import Path
 
 import typer
 
+from eurpe.config import (
+    DEFAULT_CONFIG_PATH,
+    EXAMPLE_CONFIG_PATH,
+    ensure_config_file,
+    load_config,
+)
 from eurpe.ingestion.docling_parser import DoclingProposalParser
 from eurpe.ingestion.errors import IngestionError, ParserError, UnsupportedFormatError
 from eurpe.ingestion.models import ParsedProposal
@@ -71,6 +86,16 @@ def ingest(
             "missing. Only written on successful parse."
         ),
     ),
+    overwrite: bool = typer.Option(
+        False,
+        "--overwrite",
+        "-f",
+        help=(
+            "Overwrite an existing <stem>.parsed.json. Without this "
+            "flag the CLI errors out rather than silently clobbering a "
+            "previous parse."
+        ),
+    ),
     metadata: Path | None = typer.Option(
         None,
         "--metadata",
@@ -81,13 +106,27 @@ def ingest(
             "with chunking (issue #4)."
         ),
     ),
+    config_path: Path = typer.Option(
+        DEFAULT_CONFIG_PATH,
+        "--config",
+        "-c",
+        help="Path to config.yaml (defaults to the repo-root config.yaml).",
+    ),
 ) -> None:
     """Parse one PDF and print a structural summary.
 
     Returns exit code 0 on success, 1 on any ``IngestionError``.
     """
 
-    parser = DoclingProposalParser()
+    # Load config so we can honour ``offline_mode`` (PRD §25 / §115). The
+    # bootstrap pattern matches ``eurpe smoke``: copy the example into
+    # place if no config.yaml exists yet so first-run users are not
+    # punished with a ``FileNotFoundError``. Failure to load config is a
+    # hard error — without it we cannot satisfy the offline contract.
+    used_config_path = ensure_config_file(config_path, EXAMPLE_CONFIG_PATH)
+    cfg = load_config(used_config_path)
+
+    parser = DoclingProposalParser(offline=cfg.offline_mode)
     try:
         parsed = parser.parse(pdf_path)
     except UnsupportedFormatError as exc:
@@ -113,7 +152,21 @@ def ingest(
     if output is not None:
         output.mkdir(parents=True, exist_ok=True)
         out_path = output / f"{pdf_path.stem}.parsed.json"
-        out_path.write_text(parsed.model_dump_json(indent=2), encoding="utf-8")
+        if out_path.exists() and not overwrite:
+            typer.echo(
+                f"error: output file already exists: {out_path} "
+                "(pass --overwrite/-f to replace it)",
+                err=True,
+            )
+            raise typer.Exit(code=1)
+        # Atomic write: serialize to a sibling ``.tmp`` file then
+        # ``Path.replace`` it onto the target. ``replace`` is an atomic
+        # rename on POSIX/NTFS, so a crash mid-write cannot leave a
+        # half-formed JSON visible to readers — they see either the old
+        # file or the new one.
+        tmp_path = out_path.with_suffix(out_path.suffix + ".tmp")
+        tmp_path.write_text(parsed.model_dump_json(indent=2), encoding="utf-8")
+        tmp_path.replace(out_path)
         typer.echo(f"  wrote         : {out_path}")
 
     if metadata is not None:
