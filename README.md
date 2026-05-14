@@ -91,9 +91,38 @@ The dev server starts on `http://127.0.0.1:5173`. See
 
 ### Tests
 
+The suite is split into two tiers by pytest marker so the inner-loop dev
+cycle stays fast.
+
 ```bash
-pytest -q
+# Fast tests only — skips `e2e` and `docling` markers.
+pytest -m 'not e2e and not docling' -q
+
+# Equivalent convenience target.
+make test
+
+# Full end-to-end pipeline (ingest → retrieve → generate → audit) over
+# every PDF in proposals/ plus tests/e2e/fixtures/. Single command, no
+# prompts; honours `EURPE_E2E_OUTPUT_DIR` for artefact placement.
+make e2e
+# Or directly:
+pytest tests/e2e/ -m e2e -v
 ```
+
+**E2E corpus contract.** The E2E suite picks up every `*.pdf` it finds
+in `proposals/` (developer-only — `.gitignore` excludes the directory
+from version control) and `tests/e2e/fixtures/` (the synthetic
+`sample_proposal.pdf` is generated on demand from `reportlab`). To E2E
+a new proposal, drop the PDF into `proposals/` — no code change needed.
+Per-proposal metadata can be supplied via a sibling `<stem>.yml` next
+to the PDF; if absent, the suite synthesises sensible defaults
+(`programme: horizon_europe`, `outcome: funded`, `proposal_title:
+<stem>`).
+
+**CI policy.** `.github/workflows/e2e.yml` runs the slow tier on every
+push to `main`, nightly at 03:00 UTC, and on manual dispatch. All
+other workflows should use `pytest -m 'not e2e'` so they stay
+fast.
 
 ## Schema
 
