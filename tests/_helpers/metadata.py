@@ -47,10 +47,11 @@ def synthesise_proposal_metadata(pdf_path: Path, **overrides: Any) -> dict[str, 
     ``index build`` CLI re-validates via ``ProposalMetadata.model_validate``
     so any error in the synthesised values surfaces with a clean message.
 
-    ``overrides`` win over the defaults but never over the two
-    PDF-derived fields (``source_path``, ``proposal_title``); a caller
-    that needs to override those should pass them through
-    ``write_metadata_yaml`` directly.
+    ``overrides`` win over the defaults; the PDF-derived fields
+    (``source_path``, ``proposal_title``) are applied last and so
+    override any same-named keys in ``overrides``. Callers that need
+    to pin those fields should use :func:`write_metadata_yaml`, which
+    re-applies its own ``overrides`` after this function returns.
     """
 
     body: dict[str, Any] = dict(_SYNTHESISED_DEFAULTS)
