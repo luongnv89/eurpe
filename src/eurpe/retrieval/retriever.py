@@ -23,15 +23,76 @@ The retriever does NOT call the embedder itself; it delegates to
 :class:`ChromaIndex.query` which embeds the query text under the configured
 :class:`Embedder`. Over-fetching by a factor of 4 (clamped at 100) gives
 the policy enough candidates to filter without starving the result set.
+
+Precedence — which filter wins (Issue #46)
+------------------------------------------
+When a caller passes ``section_type=``, the retriever first issues a
+Chroma query with ``{"section_type": "<value>"}`` as a *hard* where
+clause. Chunks whose ``section_type`` doesn't match are dropped
+server-side, BEFORE the score threshold, the funded-first sort, and
+the rejected-fraction cap run.
+
+That hard filter is too strict in practice: the chunker assigns
+``section_type`` from substring matches against the heading
+(``infer_section_type``), so a real proposal whose methodology lives
+under a heading like *"Approach"* or *"Concept"* yields zero
+``section_type=methodology`` chunks even though it contains the
+content the user wants. The ``index query`` CLI does NOT pass a
+section_type filter, so an operator can hand-confirm hits exist — but
+the generator's call site DOES pass it, and silently empties the
+candidate pool.
+
+The precedence the retriever enforces is therefore:
+
+1. ``source_status`` filter (if set) — a hard audience choice the
+   caller made deliberately. Never relaxed.
+2. ``programme`` filter (if set) — a hard topical choice. Never
+   relaxed.
+3. ``section_type`` filter (if set) — a SOFT hard filter. If the first
+   Chroma query returns 0 candidates AND no ``source_status`` was
+   pinned, a single retry runs *without* the section_type clause. The
+   retry is logged at WARNING so the operator sees the fallback in the
+   pipeline log; it is also surfaced as ``policy_reason`` on every
+   resulting :class:`RetrievalResult` (suffixed
+   ``_section_type_fallback``) so an audit can trace it.
+
+   Caveat: the fallback fires only when the *Chroma pool itself* is
+   empty after the section_type clause. If section_type lets 1+ chunks
+   through but every one of them then fails the score threshold, the
+   user-visible result is still empty — same observable symptom,
+   different code path. The strict behaviour is intentional there: the
+   chunker DID find relevant section_type chunks, they just happened
+   to score below the bar, and relaxing the threshold (rather than the
+   section_type filter) is the right knob.
+4. Relevance threshold, funded-first sort, rejected-fraction cap —
+   applied to whatever candidate pool the previous step produced.
+
+Note on initial composition: all three filters are initially merged
+into a single Chroma ``$and`` where clause; the "precedence" above is
+the order in which the *fallback* relaxes them — only section_type
+relaxes, and only on a genuinely empty pool.
+
+Opt-out
+-------
+A caller that wants the historical strict-filter behaviour can pass
+``enable_section_type_fallback=False`` on :meth:`retrieve`, or set
+:attr:`RetrievalPolicy.enable_section_type_fallback` to ``False`` on
+the policy. The default is ``True`` because every existing call site
+benefits from the fallback (the generator's silent-empty-pool bug is
+the only realistic outcome of strict-filter on real corpora).
 """
 
 from __future__ import annotations
+
+import logging
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from eurpe.retrieval.index import ChromaIndex
 from eurpe.retrieval.models import Chunk
 from eurpe.schema import Programme, SectionType, SourceStatus
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Internal constants
@@ -64,6 +125,13 @@ POLICY_REASON_REJECTED = "rejected_threshold_met"
 POLICY_REASON_LESSONS_LEARNED = "lessons_learned_mode"
 POLICY_REASON_ESR = "esr_advisory"
 POLICY_REASON_UNKNOWN = "unknown_low_confidence"
+
+#: Suffix appended to ``policy_reason`` when the section_type hard filter
+#: was relaxed because the initial Chroma query returned 0 candidates.
+#: An audit can grep for this suffix to count fallback events; the prefix
+#: still names the per-chunk status reason (funded_primary, etc.) so the
+#: source-status story is not lost.
+POLICY_REASON_SECTION_TYPE_FALLBACK_SUFFIX = "_section_type_fallback"
 
 
 # ---------------------------------------------------------------------------
@@ -195,6 +263,21 @@ class RetrievalPolicy(BaseModel):
             "Ignored when lessons_learned_mode is True."
         ),
     )
+    enable_section_type_fallback: bool = Field(
+        default=True,
+        description=(
+            "When True (default), a section_type-filtered query that returns "
+            "0 candidates triggers a single retry without the section_type "
+            "clause. The retry only runs when no source_status filter was "
+            "pinned (a source_status pin is a deliberate audience choice the "
+            "caller made and we never relax it). The fallback is the "
+            "Issue #46 fix: real-world proposals often bury methodology "
+            "under headings the chunker labels as ``other``, which would "
+            "otherwise empty the candidate pool before any policy runs. "
+            "Set to False for benchmarks that need strict section_type "
+            "filtering."
+        ),
+    )
 
     model_config = ConfigDict(extra="forbid")
 
@@ -283,6 +366,7 @@ class SourceStatusAwareRetriever:
         section_type: SectionType | None = None,
         source_status: SourceStatus | None = None,
         lessons_learned: bool | None = None,
+        enable_section_type_fallback: bool | None = None,
     ) -> list[RetrievalResult]:
         """Return up to ``top_k`` policy-filtered results for ``query``.
 
@@ -295,6 +379,16 @@ class SourceStatusAwareRetriever:
            funded-first ordering are computable. The caller can still pass
            ``source_status=`` explicitly to scope to one status.
         2. Over-fetch candidates from Chroma (``top_k * 4``, capped at 100).
+           If ``section_type`` was set AND the first fetch returned 0
+           candidates AND no ``source_status`` is pinned AND the
+           section_type fallback is enabled, retry once *without* the
+           section_type clause and tag the fallback in ``policy_reason``.
+           Issue #46: the chunker labels chunks by heading substring, so a
+           proposal that buries methodology under "Approach" produces zero
+           ``section_type=methodology`` chunks even though the content is
+           there. ``index query`` doesn't filter by section_type, so the
+           operator can hand-confirm hits exist — the fallback closes the
+           gap for ``generate section``.
         3. Apply the per-status threshold. Default: same threshold for
            every status. Lessons-learned mode (global or per-call): the
            REJECTED threshold relaxes by ``rejected_threshold_offset``.
@@ -312,6 +406,10 @@ class SourceStatusAwareRetriever:
         ``lessons_learned`` (per-call override) takes precedence over
         :attr:`RetrievalPolicy.lessons_learned_mode` when not None. Use
         ``None`` to inherit the policy default.
+        ``enable_section_type_fallback`` (per-call override) takes
+        precedence over :attr:`RetrievalPolicy.enable_section_type_fallback`
+        when not None; pass ``False`` to force strict section_type
+        filtering for the call.
         """
 
         if top_k <= 0:
@@ -319,6 +417,11 @@ class SourceStatusAwareRetriever:
 
         lessons_active = (
             self._policy.lessons_learned_mode if lessons_learned is None else lessons_learned
+        )
+        fallback_enabled = (
+            self._policy.enable_section_type_fallback
+            if enable_section_type_fallback is None
+            else enable_section_type_fallback
         )
 
         # Step 1: hard filters → Chroma where clause.
@@ -331,6 +434,41 @@ class SourceStatusAwareRetriever:
         # Step 2: over-fetch candidates so policy has room to work.
         candidate_k = min(_MAX_FETCH_CANDIDATES, top_k * _OVER_FETCH_MULTIPLIER)
         raw = self._index.query(query, top_k=candidate_k, where=where)
+
+        # Step 2b (Issue #46): section_type fallback. Only fires when the
+        # filter was actually section_type-bearing, the initial fetch
+        # produced nothing, no source_status was pinned, and the policy
+        # opt-in is still on. The fallback drops only the section_type
+        # clause — programme stays put because it represents the call's
+        # topical scope, which the user did NOT relax.
+        section_type_fallback_active = False
+        if (
+            fallback_enabled
+            and section_type is not None
+            and source_status is None
+            and not raw
+        ):
+            fallback_where = self._build_where_clause(
+                programme=programme,
+                section_type=None,
+                source_status=None,
+            )
+            fallback_raw = self._index.query(
+                query, top_k=candidate_k, where=fallback_where
+            )
+            if fallback_raw:
+                logger.warning(
+                    "section_type=%s filter returned 0 candidates; falling back "
+                    "to an unfiltered query and got %d candidate(s). The chunker "
+                    "may not have labelled any chunks for this section type "
+                    "(headings like 'Approach' or 'Concept' resolve to "
+                    "section_type=other). Pass "
+                    "enable_section_type_fallback=False to disable.",
+                    section_type.value,
+                    len(fallback_raw),
+                )
+                raw = fallback_raw
+                section_type_fallback_active = True
 
         # Step 3 + 4: threshold filter + ESR exclusion.
         filtered = self._apply_threshold(raw, lessons_active=lessons_active)
@@ -346,7 +484,11 @@ class SourceStatusAwareRetriever:
         )
 
         # Step 7: take top_k, assign ranks + reasons.
-        return self._build_results(capped[:top_k], lessons_active=lessons_active)
+        return self._build_results(
+            capped[:top_k],
+            lessons_active=lessons_active,
+            section_type_fallback_active=section_type_fallback_active,
+        )
 
     # ------------------------------------------------------------------
     # Internal helpers — kept private but small enough to test indirectly
@@ -496,18 +638,29 @@ class SourceStatusAwareRetriever:
         candidates: list[tuple[Chunk, float]],
         *,
         lessons_active: bool,
+        section_type_fallback_active: bool = False,
     ) -> list[RetrievalResult]:
-        """Turn the final candidate list into :class:`RetrievalResult` records."""
+        """Turn the final candidate list into :class:`RetrievalResult` records.
+
+        When ``section_type_fallback_active`` is True, every emitted
+        :attr:`RetrievalResult.policy_reason` carries the
+        :data:`POLICY_REASON_SECTION_TYPE_FALLBACK_SUFFIX` so an audit can
+        trace that the strict section_type filter was relaxed for this
+        call (see Issue #46).
+        """
 
         out: list[RetrievalResult] = []
         for rank, (chunk, score) in enumerate(candidates, start=1):
             status = chunk.metadata.source_status
+            reason = self._policy_reason_for(status, lessons_active=lessons_active)
+            if section_type_fallback_active:
+                reason = f"{reason}{POLICY_REASON_SECTION_TYPE_FALLBACK_SUFFIX}"
             out.append(
                 RetrievalResult(
                     chunk=chunk,
                     score=score,
                     rank=rank,
-                    policy_reason=self._policy_reason_for(status, lessons_active=lessons_active),
+                    policy_reason=reason,
                 )
             )
         return out

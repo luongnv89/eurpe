@@ -46,6 +46,7 @@ from eurpe.retrieval.retriever import (
     POLICY_REASON_FUNDED,
     POLICY_REASON_LESSONS_LEARNED,
     POLICY_REASON_REJECTED,
+    POLICY_REASON_SECTION_TYPE_FALLBACK_SUFFIX,
     POLICY_REASON_UNKNOWN,
 )
 from eurpe.schema import (
@@ -511,6 +512,170 @@ def test_no_match_with_high_threshold_returns_empty() -> None:
     assert results == []
 
 
+# --- Section_type fallback (Issue #46) ------------------------------------
+
+
+def test_section_type_filter_empty_pool_falls_back_to_unfiltered() -> None:
+    """Issue #46: ``section_type=methodology`` finding 0 candidates retries unfiltered.
+
+    Reproduces the GEIGER gap from the issue: the chunker labelled every
+    chunk with ``section_type=other`` (or non-methodology), so the
+    ``index query`` CLI — which does not pass a section_type filter —
+    returns hits, while ``generate section --type methodology`` empties
+    the candidate pool server-side. With the fallback enabled, the same
+    retriever call still returns the hits and tags them so an audit can
+    trace that the filter was relaxed.
+    """
+
+    # Both rows are _rejected (impact) and _funded (methodology), but
+    # we set the funded one's section_type to OTHER so a methodology
+    # filter rejects everything on the first call.
+    impact_funded = _make_chunk(
+        status=SourceStatus.FUNDED,
+        section_type=SectionType.OTHER,
+        document_id="other_section",
+    )
+    rows = [(impact_funded, 0.5)]
+    stub = _StubIndex(rows)
+    retriever = SourceStatusAwareRetriever(
+        stub,
+        policy=RetrievalPolicy(relevance_threshold=0.0),
+    )
+
+    # Sanity: with the strict filter on (opt-out), the result list is empty.
+    strict_results = retriever.retrieve(
+        "query",
+        top_k=5,
+        section_type=SectionType.METHODOLOGY,
+        enable_section_type_fallback=False,
+    )
+    assert strict_results == []
+
+    # With the fallback enabled (the default), we get the row back.
+    fallback_results = retriever.retrieve(
+        "query",
+        top_k=5,
+        section_type=SectionType.METHODOLOGY,
+    )
+    assert len(fallback_results) == 1
+    assert fallback_results[0].chunk is impact_funded
+    # Policy reason carries the fallback suffix so audits can trace it.
+    assert fallback_results[0].policy_reason.endswith(
+        POLICY_REASON_SECTION_TYPE_FALLBACK_SUFFIX
+    )
+    # The underlying status reason still leads the string.
+    assert fallback_results[0].policy_reason.startswith(POLICY_REASON_FUNDED)
+    # Two index calls were made: the first with the section_type clause,
+    # the second without.
+    assert len(stub.calls) >= 2
+    assert stub.calls[-2]["where"] == {"section_type": "methodology"}
+    assert stub.calls[-1]["where"] is None
+
+
+def test_section_type_fallback_does_not_fire_when_pool_nonempty() -> None:
+    """Successful section_type-filtered call does NOT trigger a fallback retry."""
+
+    rows = [(_funded(), 0.9)]  # _funded() defaults to methodology
+    stub = _StubIndex(rows)
+    retriever = SourceStatusAwareRetriever(stub)
+    results = retriever.retrieve(
+        "query", top_k=5, section_type=SectionType.METHODOLOGY
+    )
+
+    # Exactly one index call — no fallback.
+    assert len(stub.calls) == 1
+    assert stub.calls[0]["where"] == {"section_type": "methodology"}
+    # policy_reason carries no fallback suffix.
+    assert "_section_type_fallback" not in results[0].policy_reason
+
+
+def test_section_type_fallback_skipped_when_source_status_pinned() -> None:
+    """A pinned ``source_status`` is a deliberate audience pick — never relax it."""
+
+    # No funded methodology rows, but a rejected impact row exists.
+    rows = [(_rejected(), 0.5)]
+    stub = _StubIndex(rows)
+    retriever = SourceStatusAwareRetriever(
+        stub,
+        policy=RetrievalPolicy(relevance_threshold=0.0, max_rejected_fraction=1.0),
+    )
+
+    results = retriever.retrieve(
+        "query",
+        top_k=5,
+        section_type=SectionType.METHODOLOGY,
+        source_status=SourceStatus.FUNDED,
+    )
+
+    # Empty — fallback would have surfaced a rejected chunk we MUST NOT
+    # return when the caller pinned source_status=funded.
+    assert results == []
+    # Exactly one index call — fallback skipped.
+    assert len(stub.calls) == 1
+
+
+def test_section_type_fallback_disabled_in_policy() -> None:
+    """``RetrievalPolicy(enable_section_type_fallback=False)`` preserves strict mode."""
+
+    impact_chunk = _make_chunk(
+        status=SourceStatus.FUNDED,
+        section_type=SectionType.OTHER,
+    )
+    rows = [(impact_chunk, 0.5)]
+    stub = _StubIndex(rows)
+    retriever = SourceStatusAwareRetriever(
+        stub,
+        policy=RetrievalPolicy(
+            relevance_threshold=0.0,
+            enable_section_type_fallback=False,
+        ),
+    )
+
+    results = retriever.retrieve(
+        "query", top_k=5, section_type=SectionType.METHODOLOGY
+    )
+
+    assert results == []
+    assert len(stub.calls) == 1
+
+
+def test_section_type_fallback_preserves_programme_filter() -> None:
+    """Fallback drops section_type but keeps programme intact.
+
+    The user's programme pin (HORIZON_EUROPE) is a deliberate topical
+    scope decision — even when we relax section_type, we must NOT
+    cross-pollinate with chunks from other programmes.
+    """
+
+    he_other = _make_chunk(
+        status=SourceStatus.FUNDED,
+        programme=Programme.HORIZON_EUROPE,
+        section_type=SectionType.OTHER,
+        document_id="he_other",
+    )
+    rows = [(he_other, 0.5)]
+    stub = _StubIndex(rows)
+    retriever = SourceStatusAwareRetriever(
+        stub,
+        policy=RetrievalPolicy(relevance_threshold=0.0),
+    )
+
+    results = retriever.retrieve(
+        "query",
+        top_k=5,
+        section_type=SectionType.METHODOLOGY,
+        programme=Programme.HORIZON_EUROPE,
+    )
+
+    assert len(results) == 1
+    # First call had both filters (under $and); fallback call kept programme.
+    first_where = stub.calls[0]["where"]
+    assert isinstance(first_where, dict)
+    assert "$and" in first_where
+    second_where = stub.calls[-1]["where"]
+    assert second_where == {"proposal.programme": "horizon_europe"}
+
+
 # --- Corpus-shape scenarios -----------------------------------------------
 
 
@@ -813,3 +978,47 @@ def test_integration_offline_no_network(tmp_path, no_network: None) -> None:  # 
     )
     assert results
     assert results[0].source_status is SourceStatus.FUNDED
+
+
+def test_integration_section_type_fallback_against_chroma(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """Issue #46 integration check on a real Chroma index.
+
+    Reproduces the GEIGER pattern in miniature: the seeded chunks
+    include exactly one ``methodology``-labelled fixture, none labelled
+    ``consortium``. A query for the funded fixture's marker (which only
+    matches that one methodology chunk) with ``section_type=consortium``
+    would, without the fallback, return 0 results — exactly the gap the
+    issue describes between ``index query`` (no filter, hits returned)
+    and ``generate section --type consortium`` (filter, hits dropped).
+    With the fallback enabled, the funded chunk comes back tagged so an
+    audit can see the relaxation.
+    """
+
+    index = _build_real_retriever(tmp_path)
+    policy = RetrievalPolicy(relevance_threshold=0.0, max_rejected_fraction=1.0)
+    retriever = SourceStatusAwareRetriever(index, policy=policy)
+    marker_query = query_text_for("funded_horizon_europe.yaml")
+
+    # Strict mode (opt-out): no consortium-typed chunk exists → empty.
+    strict_results = retriever.retrieve(
+        marker_query,
+        top_k=5,
+        section_type=SectionType.CONSORTIUM,
+        enable_section_type_fallback=False,
+    )
+    assert strict_results == []
+
+    # Default mode (fallback on): the funded chunk comes back, tagged.
+    fallback_results = retriever.retrieve(
+        marker_query,
+        top_k=5,
+        section_type=SectionType.CONSORTIUM,
+    )
+    assert fallback_results, "fallback should have returned the marker chunk"
+    # Identity check: the funded fixture's unique marker token lands at
+    # rank 1, not any of the other three fixtures that happened to score.
+    assert "funded_horizon_europe-marker" in fallback_results[0].chunk.text
+    assert fallback_results[0].source_status is SourceStatus.FUNDED
+    assert fallback_results[0].policy_reason.endswith(
+        POLICY_REASON_SECTION_TYPE_FALLBACK_SUFFIX
+    )
