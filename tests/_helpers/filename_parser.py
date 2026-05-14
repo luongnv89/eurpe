@@ -63,7 +63,6 @@ _CALL_ID_STOP_TOKENS: frozenset[str] = frozenset(
     {
         "PART",
         "PARTB",
-        "PART_B",
         "SECTION",
         "SEALED",
         "PROPOSAL",
