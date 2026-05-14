@@ -1,0 +1,20 @@
+# ProposalMetadata sidecar for the synthetic E2E fixture PDF.
+#
+# The companion `sample_proposal.pdf` is generated on demand by
+# `tests/e2e/conftest.py::_ensure_synthetic_pdf` if it does not exist.
+# The PDF itself is intentionally NOT committed (the repo `.gitignore`
+# excludes `*.pdf`); only this YAML lives in version control so the
+# E2E suite has a deterministic non-empty corpus on a fresh CI checkout.
+#
+# The E2E pipeline forces `source_path` to the absolute on-disk path
+# during staging (see `tests/_helpers/metadata.write_metadata_yaml`),
+# so the path below is a placeholder for human readers only.
+programme: horizon_europe
+call_id: HORIZON-CL5-2024-D3-02
+topic_id: HORIZON-CL5-2024-D3-02-01
+year: 2024
+outcome: funded
+proposal_title: E2E Synthetic Proposal
+consortium_acronym: E2ESP
+source_path: sample_proposal.pdf
+language: en

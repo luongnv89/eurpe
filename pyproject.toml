@@ -101,4 +101,5 @@ addopts = "-ra --strict-markers"
 # tests that import docling and may download model weights on first run.
 markers = [
     "docling: integration tests that require docling and may download model weights",
+    "e2e: end-to-end pipeline tests that iterate over proposals/ (slow)",
 ]
