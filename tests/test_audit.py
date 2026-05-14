@@ -116,9 +116,7 @@ def test_audit_detects_marker_without_citation() -> None:
     codes = {f.code for f in result.errors}
     assert "marker_without_citation" in codes
     # The offending citation_id is surfaced for the operator.
-    offending = [
-        f for f in result.errors if f.code == "marker_without_citation"
-    ]
+    offending = [f for f in result.errors if f.code == "marker_without_citation"]
     assert any(f.citation_id == 99 for f in offending)
 
 
@@ -305,9 +303,7 @@ def test_audit_rejects_three_digit_marker() -> None:
     assert result.passed is False
     codes = {f.code for f in result.errors}
     assert "marker_without_citation" in codes
-    offending = [
-        f for f in result.errors if f.code == "marker_without_citation"
-    ]
+    offending = [f for f in result.errors if f.code == "marker_without_citation"]
     assert any(f.citation_id == 100 for f in offending)
 
 
@@ -373,6 +369,158 @@ def test_audit_fails_when_call_id_is_blank() -> None:
     assert result.passed is False
     codes = {f.code for f in result.errors}
     assert "empty_call_id" in codes
+
+
+# ---------------------------------------------------------------------------
+# Runtime audit gates — issue #45
+# ---------------------------------------------------------------------------
+
+
+def test_audit_fails_on_no_evidence_escape_with_empty_citations() -> None:
+    """Escape sentence + zero citations → ``no_evidence_escape`` ERROR.
+
+    AC1 of issue #45: the audit must NOT pass a draft that explicitly
+    admits "no retrieved evidence was available" while carrying an
+    empty citation table.
+    """
+
+    draft = _make_draft(
+        citations=[],
+        text=(
+            "Draft for the Methodology section. "
+            "No retrieved evidence was available; expand the index "
+            "with relevant past proposals before relying on this draft."
+        ),
+    )
+
+    result = CitationAudit().audit_draft(draft)
+
+    assert result.passed is False
+    codes = {f.code for f in result.errors}
+    assert "no_evidence_escape" in codes
+
+
+def test_audit_passes_when_escape_sentence_appears_but_citations_present() -> None:
+    """Escape sentence alone does NOT fail when citations exist.
+
+    The dual condition (escape sentence AND empty citations) keeps the
+    gate narrow: a real LLM that discusses the absence of corroborating
+    evidence while still citing comparators must not be flagged.
+    """
+
+    citations = [_make_citation(citation_id=1, status=SourceStatus.FUNDED)]
+    draft = _make_draft(
+        citations=citations,
+        text=(
+            "We note that no retrieved evidence was available; expand the index "
+            "with relevant past proposals before relying on this draft. "
+            "Nevertheless, comparator [1] guides the design."
+        ),
+    )
+
+    result = CitationAudit().audit_draft(draft)
+
+    codes = {f.code for f in result.errors}
+    assert "no_evidence_escape" not in codes
+
+
+def test_audit_passes_when_empty_citations_without_escape_sentence() -> None:
+    """Empty citations alone (no escape sentence) does not trip the gate.
+
+    A LangGraph node that legitimately returns a draft with no citation
+    list and no escape sentence (e.g., a planning step that runs before
+    retrieval) is out of scope for this gate.
+    """
+
+    draft = _make_draft(
+        citations=[],
+        text="Draft for the Methodology section without any retrieved evidence.",
+    )
+
+    result = CitationAudit().audit_draft(draft)
+
+    codes = {f.code for f in result.errors}
+    assert "no_evidence_escape" not in codes
+
+
+def test_audit_fails_on_placeholder_text_even_with_citations() -> None:
+    """Stub placeholder leaked into draft body → ``placeholder_text`` ERROR.
+
+    AC2 of issue #45: if the deterministic stub's literal placeholder
+    sentence lands in a real run, the stub leaked through the
+    offline-fallback path and the draft is not trustworthy regardless
+    of how many citations it carries.
+    """
+
+    citations = [
+        _make_citation(citation_id=1, status=SourceStatus.FUNDED),
+        _make_citation(citation_id=2, status=SourceStatus.REJECTED),
+    ]
+    draft = _make_draft(
+        citations=citations,
+        text=(
+            "Draft for the Methodology section, derived from retrieved evidence. "
+            "This sentence references retrieved example [1] as supporting evidence. "
+            "This sentence references retrieved example [2] as supporting evidence."
+        ),
+    )
+
+    result = CitationAudit().audit_draft(draft)
+
+    assert result.passed is False
+    codes = {f.code for f in result.errors}
+    assert "placeholder_text" in codes
+
+
+def test_audit_passes_when_text_describes_evidence_without_placeholder() -> None:
+    """Prose that *paraphrases* the placeholder does not trip the gate.
+
+    The regex is anchored on the literal stub output. A real LLM that
+    writes ``This sentence reflects evidence from comparator [1]`` is
+    safe; only the verbatim stub phrasing fails.
+    """
+
+    citations = [_make_citation(citation_id=1, status=SourceStatus.FUNDED)]
+    draft = _make_draft(
+        citations=citations,
+        text=(
+            "This sentence reflects supporting evidence drawn from comparator "
+            "[1] in the indexed corpus."
+        ),
+    )
+
+    result = CitationAudit().audit_draft(draft)
+
+    codes = {f.code for f in result.errors}
+    assert "placeholder_text" not in codes
+
+
+def test_audit_rendered_also_fires_runtime_gates() -> None:
+    """The runtime gates fire in :meth:`audit_rendered` as well.
+
+    Same contract as :meth:`audit_draft` — a rendered draft that
+    admits "no retrieved evidence" with an empty citation table must
+    not pass the audit either.
+    """
+
+    draft = _make_draft(
+        citations=[],
+        text=(
+            "Draft for the Methodology section. "
+            "No retrieved evidence was available; expand the index "
+            "with relevant past proposals before relying on this draft."
+        ),
+    )
+    rendered = MarkdownCitationRenderer().render(draft)
+
+    result = CitationAudit().audit_rendered(draft, rendered)
+
+    assert result.passed is False
+    codes = {f.code for f in result.errors}
+    assert "no_evidence_escape" in codes
+
+
+# ---------------------------------------------------------------------------
 
 
 def test_audit_fails_when_programme_is_none() -> None:
