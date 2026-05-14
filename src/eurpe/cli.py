@@ -19,6 +19,7 @@ from eurpe.config import (
     ensure_runtime_dirs,
     load_config,
 )
+from eurpe.generation.cli import generate_app
 from eurpe.ingestion.cli import ingest as ingest_command
 from eurpe.retrieval.cli import index_app
 
@@ -40,6 +41,12 @@ app.command("ingest")(ingest_command)
 # package; mounting the sub-Typer here keeps the top-level CLI thin
 # while letting the retrieval package own its own option signature.
 app.add_typer(index_app, name="index")
+
+# ``eurpe generate section`` lives in the generation package — same
+# pattern as ``index``. Mounted as a sub-Typer so future ``generate``
+# sub-actions (e.g., ``generate full-proposal``) can land without
+# touching the top-level CLI bootstrap.
+app.add_typer(generate_app, name="generate")
 
 
 @app.command()
