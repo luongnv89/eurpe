@@ -95,6 +95,16 @@ The dev server starts on `http://127.0.0.1:5173`. See
 pytest -q
 ```
 
+## Schema
+
+Proposal and chunk metadata are typed Pydantic v2 models in
+[`src/eurpe/schema/`](src/eurpe/schema/). Every chunk carries an explicit
+`source_status` drawn from the closed set **`funded` / `rejected` /
+`esr_note` / `unknown`**, and a validator guarantees that a chunk's status
+can never drift from its parent proposal's `outcome`. See
+[`tests/fixtures/metadata/`](tests/fixtures/metadata/) for one round-trip
+example per status.
+
 ## Privacy guarantees
 
 - `offline_mode: true` is the default in `config.example.yaml`; it must be

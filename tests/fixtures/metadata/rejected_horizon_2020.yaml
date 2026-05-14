@@ -1,0 +1,23 @@
+# Rejected Horizon 2020 proposal — Impact section chunk.
+# Used by test_chunk_metadata_round_trips_all_fixtures.
+proposal:
+  programme: horizon_2020
+  call_id: H2020-ICT-2018-2
+  topic_id: ICT-13-2018-2019
+  year: 2018
+  outcome: rejected
+  proposal_title: Federated Threat Intelligence for SMEs
+  consortium_acronym: FedTI
+  source_path: data/corpus/rejected/fedti_part_b.pdf
+  language: en
+  ingested_at: 2025-01-15T09:31:00+00:00
+section_type: impact
+parent_section_heading: "2.1 Expected impacts"
+chunk_index: 4
+anchor:
+  document_id: fedti_part_b
+  section_heading: "2.1 Expected impacts"
+  page: 22
+  char_start: 41200
+  char_end: 42500
+source_status: rejected
