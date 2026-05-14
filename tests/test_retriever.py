@@ -639,6 +639,44 @@ def test_section_type_fallback_disabled_in_policy() -> None:
     assert len(stub.calls) == 1
 
 
+def test_section_type_fallback_per_call_kwarg_overrides_policy() -> None:
+    """Per-call ``enable_section_type_fallback=True`` wins over policy=False.
+
+    Mirrors the policy-disabled fixture but flips the per-call kwarg to
+    True, proving the override resolution at retriever.py works in both
+    directions (the policy-default-True / per-call-False direction is
+    covered by ``test_section_type_filter_empty_pool_falls_back_to_unfiltered``).
+    """
+
+    impact_chunk = _make_chunk(
+        status=SourceStatus.FUNDED,
+        section_type=SectionType.OTHER,
+    )
+    rows = [(impact_chunk, 0.5)]
+    stub = _StubIndex(rows)
+    retriever = SourceStatusAwareRetriever(
+        stub,
+        policy=RetrievalPolicy(
+            relevance_threshold=0.0,
+            enable_section_type_fallback=False,
+        ),
+    )
+
+    results = retriever.retrieve(
+        "query",
+        top_k=5,
+        section_type=SectionType.METHODOLOGY,
+        enable_section_type_fallback=True,
+    )
+
+    assert len(results) == 1
+    assert results[0].chunk is impact_chunk
+    assert results[0].policy_reason.endswith(
+        POLICY_REASON_SECTION_TYPE_FALLBACK_SUFFIX
+    )
+    assert len(stub.calls) == 2
+
+
 def test_section_type_fallback_preserves_programme_filter() -> None:
     """Fallback drops section_type but keeps programme intact.
 

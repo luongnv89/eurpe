@@ -409,7 +409,12 @@ class SourceStatusAwareRetriever:
         ``enable_section_type_fallback`` (per-call override) takes
         precedence over :attr:`RetrievalPolicy.enable_section_type_fallback`
         when not None; pass ``False`` to force strict section_type
-        filtering for the call.
+        filtering for the call. The per-call kwarg mirrors
+        ``lessons_learned``: a benchmark or diagnostic caller may need to
+        flip the knob for a single query without rebuilding the policy
+        (e.g. to A/B strict-vs-fallback on a fixed corpus). Other policy
+        knobs (threshold, max_rejected_fraction) stay policy-only because
+        they describe the corpus, not the call.
         """
 
         if top_k <= 0:
