@@ -69,3 +69,6 @@ Thumbs.db
 # Logs
 *.log
 logs/
+
+# E2E run artefacts (created by `make e2e` / EURPE_E2E_OUTPUT_DIR).
+tests/e2e/_runs/

@@ -1,0 +1,57 @@
+name: E2E pipeline
+
+# AC6 of issue #43: the E2E suite must be wired into CI and clearly
+# separated from the fast unit suite. The fast suite runs in any other
+# workflow with `pytest -m 'not e2e'`; this workflow is the only one
+# that actually exercises the slow pipeline path.
+#
+# Triggers:
+#   * push to main — guards regressions on the integration surface.
+#   * workflow_dispatch — manual re-run from the UI when investigating.
+#   * schedule (nightly) — catches drift from upstream Docling /
+#     Chroma / Ollama dependency updates.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  schedule:
+    # 03:00 UTC daily — well off peak-CI hours for the org.
+    - cron: "0 3 * * *"
+
+jobs:
+  e2e:
+    name: pytest -m e2e
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # Per AC5: write run artefacts to a predictable location so the
+      # workflow can upload them on failure. The E2E test honours this
+      # env var (see tests/e2e/test_full_pipeline.py).
+      EURPE_E2E_OUTPUT_DIR: ${{ github.workspace }}/e2e-artifacts
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install package + dev deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Run E2E pipeline tests
+        run: |
+          mkdir -p "${EURPE_E2E_OUTPUT_DIR}"
+          pytest tests/e2e/ -m e2e -v
+
+      - name: Upload E2E artefacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-artifacts
+          path: ${{ env.EURPE_E2E_OUTPUT_DIR }}
+          retention-days: 7
