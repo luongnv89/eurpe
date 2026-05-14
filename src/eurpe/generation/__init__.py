@@ -18,6 +18,12 @@ imports from ``eurpe.generation`` rather than internal modules:
   client backends and factory.
 * :class:`SectionGenerationWorkflow` — orchestrates the full
   retrieve → prompt → generate → validate → assemble pipeline.
+* :class:`MarkdownCitationRenderer`, :data:`STATUS_LABEL`,
+  :data:`STATUS_BADGE`, :data:`STATUS_CAVEAT` — Markdown rendering
+  with visible source-status labels (Issue #7).
+* :class:`CitationAudit`, :class:`AuditFinding`, :class:`AuditResult`,
+  :class:`AuditSeverity` — release-blocking checks for source-status
+  compliance (Issue #7).
 * Three exception types: :class:`GenerationError`,
   :class:`LLMUnavailableError`, :class:`OfflineLLMError`.
 
@@ -27,6 +33,12 @@ LangGraph is intentionally NOT used yet; see the docstring of
 
 from __future__ import annotations
 
+from eurpe.generation.audit import (
+    AuditFinding,
+    AuditResult,
+    AuditSeverity,
+    CitationAudit,
+)
 from eurpe.generation.errors import (
     GenerationError,
     LLMUnavailableError,
@@ -40,10 +52,23 @@ from eurpe.generation.llm import (
 )
 from eurpe.generation.models import CitationRef, GenerationDraft, GenerationRequest
 from eurpe.generation.prompt import SECTION_GUIDANCE, SectionPromptBuilder
+from eurpe.generation.render import (
+    STATUS_BADGE,
+    STATUS_CAVEAT,
+    STATUS_LABEL,
+    MarkdownCitationRenderer,
+)
 from eurpe.generation.workflow import SectionGenerationWorkflow
 
 __all__ = [
     "SECTION_GUIDANCE",
+    "STATUS_BADGE",
+    "STATUS_CAVEAT",
+    "STATUS_LABEL",
+    "AuditFinding",
+    "AuditResult",
+    "AuditSeverity",
+    "CitationAudit",
     "CitationRef",
     "DeterministicLLMClient",
     "GenerationDraft",
@@ -51,6 +76,7 @@ __all__ = [
     "GenerationRequest",
     "LLMClient",
     "LLMUnavailableError",
+    "MarkdownCitationRenderer",
     "OfflineLLMError",
     "OllamaLLMClient",
     "SectionGenerationWorkflow",

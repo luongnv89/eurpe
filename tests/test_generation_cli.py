@@ -68,7 +68,12 @@ def _seed_index_with_fixtures(tmp_path: Path) -> int:
 
 
 def test_generate_section_cli_produces_draft(tmp_path: Path) -> None:
-    """Happy path: --type + --intent yield a draft + a citations table."""
+    """Happy path: --type + --intent yield a rendered Markdown draft.
+
+    The default ``--render`` is ``both``; on stdout that prints the
+    rendered Markdown form (heading + body + references). The JSON
+    form is written under ``--output`` only.
+    """
 
     cfg_path = _write_offline_config(tmp_path)
     _seed_index_with_fixtures(tmp_path)
@@ -90,8 +95,9 @@ def test_generate_section_cli_produces_draft(tmp_path: Path) -> None:
         ],
     )
     assert result.exit_code == 0, result.output
-    assert "Generated draft" in result.output
-    assert "Citations" in result.output
+    # Markdown rendering: section heading + references block.
+    assert "# Methodology" in result.output
+    assert "## References" in result.output
 
 
 def test_generate_section_cli_runs_with_unreachable_ollama_offline(tmp_path: Path) -> None:
@@ -126,7 +132,13 @@ def test_generate_section_cli_runs_with_unreachable_ollama_offline(tmp_path: Pat
 
 
 def test_generate_section_cli_with_empty_index(tmp_path: Path) -> None:
-    """Empty index → CLI still emits a draft + a "no citations" notice."""
+    """Empty index → CLI still emits a draft + a "no citations" notice.
+
+    Under the default ``--render both`` the rendered Markdown is what
+    lands on stdout; the renderer's "no citations" placeholder is
+    ``_No citations._`` (italic Markdown so a casual reader can't miss
+    it).
+    """
 
     cfg_path = _write_offline_config(tmp_path)
     # Don't seed anything — the index will be empty.
@@ -148,8 +160,8 @@ def test_generate_section_cli_with_empty_index(tmp_path: Path) -> None:
         ],
     )
     assert result.exit_code == 0, result.output
-    assert "Generated draft" in result.output
-    assert "(none — no evidence retrieved)" in result.output
+    assert "# Methodology" in result.output
+    assert "_No citations._" in result.output
 
 
 def test_generate_section_cli_writes_output_atomically(tmp_path: Path) -> None:
@@ -456,3 +468,314 @@ def test_generate_section_cli_context_with_missing_file_errors(tmp_path: Path) -
     )
     assert result.exit_code != 0
     assert "does not exist" in result.output
+
+
+# ---------------------------------------------------------------------------
+# Issue #7 — render mode + audit subcommand
+# ---------------------------------------------------------------------------
+
+
+def _write_clean_draft(tmp_path: Path) -> Path:
+    """Write a hand-crafted clean GenerationDraft JSON to disk.
+
+    Used by the ``audit`` subcommand tests so they don't depend on
+    re-running the workflow. The shape mirrors what
+    ``GenerationDraft.model_dump_json`` produces.
+    """
+
+    payload = {
+        "section_type": "methodology",
+        "text": "We propose [1].",
+        "citations": [
+            {
+                "citation_id": 1,
+                "source_status": "funded",
+                "programme": "horizon_europe",
+                "call_id": "HORIZON-CL5-2024-D3-02",
+                "proposal_title": "Test Proposal",
+                "section_heading": "Methodology",
+                "page": 12,
+                "chunk_id": "chunk-1",
+                "snippet": "snippet text",
+            }
+        ],
+        "prompt_used": "(elided)",
+        "model": "deterministic-stub-v1",
+        "request": {
+            "section_type": "methodology",
+            "user_intent": "test",
+            "call_context": "",
+            "target_programme": None,
+            "top_k_examples": 5,
+            "lessons_learned": False,
+        },
+    }
+    path = tmp_path / "clean-draft.json"
+    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    return path
+
+
+def _write_dirty_draft(tmp_path: Path) -> Path:
+    """Write a draft whose text contains a marker [99] that has no citation."""
+
+    payload = {
+        "section_type": "methodology",
+        "text": "We propose [1] and also [99].",
+        "citations": [
+            {
+                "citation_id": 1,
+                "source_status": "funded",
+                "programme": "horizon_europe",
+                "call_id": "HORIZON-CL5-2024-D3-02",
+                "proposal_title": "Test Proposal",
+                "section_heading": "Methodology",
+                "page": 12,
+                "chunk_id": "chunk-1",
+                "snippet": "snippet text",
+            }
+        ],
+        "prompt_used": "(elided)",
+        "model": "deterministic-stub-v1",
+        "request": {
+            "section_type": "methodology",
+            "user_intent": "test",
+            "call_context": "",
+            "target_programme": None,
+            "top_k_examples": 5,
+            "lessons_learned": False,
+        },
+    }
+    path = tmp_path / "dirty-draft.json"
+    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    return path
+
+
+def test_cli_renders_markdown_when_render_markdown(tmp_path: Path) -> None:
+    """``--render markdown`` emits a Markdown document with a ``## References`` block."""
+
+    cfg_path = _write_offline_config(tmp_path)
+    _seed_index_with_fixtures(tmp_path)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "generate",
+            "section",
+            "--type",
+            "methodology",
+            "--intent",
+            "Describe our DL approach",
+            "--threshold",
+            "0.0",
+            "--render",
+            "markdown",
+            "--config",
+            str(cfg_path),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert "## References" in result.output
+    # The plaintext "Generated draft" header used by the json branch
+    # must NOT appear when --render=markdown.
+    assert "Generated draft" not in result.output
+
+
+def test_cli_renders_json_summary_when_render_json(tmp_path: Path) -> None:
+    """``--render json`` emits the plaintext draft summary, not Markdown."""
+
+    cfg_path = _write_offline_config(tmp_path)
+    _seed_index_with_fixtures(tmp_path)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "generate",
+            "section",
+            "--type",
+            "methodology",
+            "--intent",
+            "Describe our DL approach",
+            "--threshold",
+            "0.0",
+            "--render",
+            "json",
+            "--config",
+            str(cfg_path),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert "Generated draft" in result.output
+    # Markdown heading marker must not leak into json mode.
+    assert "## References" not in result.output
+
+
+def test_cli_writes_both_md_and_json(tmp_path: Path) -> None:
+    """``--render both --output base`` produces both ``base.md`` and ``base.json``."""
+
+    cfg_path = _write_offline_config(tmp_path)
+    _seed_index_with_fixtures(tmp_path)
+    out_base = tmp_path / "drafts" / "methodology"
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "generate",
+            "section",
+            "--type",
+            "methodology",
+            "--intent",
+            "Describe our DL approach",
+            "--threshold",
+            "0.0",
+            "--render",
+            "both",
+            "--output",
+            str(out_base),
+            "--config",
+            str(cfg_path),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+
+    md_path = out_base.with_suffix(".md")
+    json_path = out_base.with_suffix(".json")
+    assert md_path.exists()
+    assert json_path.exists()
+
+    # Markdown file is a valid rendered document.
+    md_text = md_path.read_text(encoding="utf-8")
+    assert "# Methodology" in md_text
+    assert "## References" in md_text
+
+    # JSON file is a valid GenerationDraft.
+    payload = json.loads(json_path.read_text(encoding="utf-8"))
+    assert payload["section_type"] == "methodology"
+    assert payload["model"] == "deterministic-stub-v1"
+
+
+def test_cli_audit_subcommand_exits_0_on_clean_draft(tmp_path: Path) -> None:
+    """``eurpe generate audit clean.json`` → exit 0."""
+
+    draft_path = _write_clean_draft(tmp_path)
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["generate", "audit", str(draft_path)])
+
+    assert result.exit_code == 0, result.output
+    # The summary line carries the file path so the operator can tell
+    # which draft was checked when piping.
+    assert "Audit summary" in result.output
+
+
+def test_cli_audit_subcommand_exits_1_on_dirty_draft(tmp_path: Path) -> None:
+    """``eurpe generate audit dirty.json`` → exit 1, mentions the failure code."""
+
+    draft_path = _write_dirty_draft(tmp_path)
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["generate", "audit", str(draft_path)])
+
+    assert result.exit_code == 1, result.output
+    # The audit prints findings to stderr; CliRunner captures both
+    # streams in result.output by default.
+    assert "marker_without_citation" in result.output
+
+
+def test_cli_audit_subcommand_rejects_invalid_json(tmp_path: Path) -> None:
+    """A malformed JSON file → exit 1 with a clean error."""
+
+    draft_path = tmp_path / "broken.json"
+    draft_path.write_text("not-json{", encoding="utf-8")
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["generate", "audit", str(draft_path)])
+
+    assert result.exit_code == 1, result.output
+    assert "not valid JSON" in result.output
+
+
+def test_cli_section_runs_audit_by_default(tmp_path: Path) -> None:
+    """Audit runs after generation by default; passing run prints the summary."""
+
+    cfg_path = _write_offline_config(tmp_path)
+    _seed_index_with_fixtures(tmp_path)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "generate",
+            "section",
+            "--type",
+            "methodology",
+            "--intent",
+            "Describe our DL approach",
+            "--threshold",
+            "0.0",
+            "--config",
+            str(cfg_path),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    # The success summary is printed to stderr by ``_print_audit_findings``.
+    assert "Audit:" in result.output
+
+
+def test_cli_no_audit_flag_skips_audit(tmp_path: Path) -> None:
+    """``--no-audit`` suppresses the post-generation audit summary."""
+
+    cfg_path = _write_offline_config(tmp_path)
+    _seed_index_with_fixtures(tmp_path)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "generate",
+            "section",
+            "--type",
+            "methodology",
+            "--intent",
+            "Describe our DL approach",
+            "--threshold",
+            "0.0",
+            "--no-audit",
+            "--config",
+            str(cfg_path),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    # No audit summary line when --no-audit is passed.
+    assert "Audit:" not in result.output
+    assert "Audit summary" not in result.output
+
+
+def test_cli_rejects_invalid_render_mode(tmp_path: Path) -> None:
+    """``--render bogus`` exits non-zero with a friendly message."""
+
+    cfg_path = _write_offline_config(tmp_path)
+    _seed_index_with_fixtures(tmp_path)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "generate",
+            "section",
+            "--type",
+            "methodology",
+            "--intent",
+            "x",
+            "--render",
+            "bogus",
+            "--threshold",
+            "0.0",
+            "--config",
+            str(cfg_path),
+        ],
+    )
+    assert result.exit_code == 1, result.output
+    assert "--render" in result.output

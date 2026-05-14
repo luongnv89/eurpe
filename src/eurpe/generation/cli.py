@@ -1,17 +1,29 @@
 """Typer commands for ``eurpe generate ...``.
 
-A single subcommand today (``eurpe generate section``) drives the
-:class:`~eurpe.generation.SectionGenerationWorkflow` end-to-end:
+Two subcommands today:
 
-1. Load config, ensure runtime dirs exist, build the embedder /
-   index / retriever (same pattern used by ``eurpe index query``).
-2. Build the LLM client via :func:`~eurpe.generation.make_llm_client`
-   so the offline-fallback path is honoured.
-3. Build the workflow, run it, print the draft + a citations table
-   to stdout.
-4. If ``--output`` is given, atomically write a JSON dump of the
-   :class:`~eurpe.generation.GenerationDraft` (same atomic-write
-   pattern as ``eurpe ingest``).
+* ``eurpe generate section`` drives the
+  :class:`~eurpe.generation.SectionGenerationWorkflow` end-to-end:
+
+  1. Load config, ensure runtime dirs exist, build the embedder /
+     index / retriever (same pattern used by ``eurpe index query``).
+  2. Build the LLM client via :func:`~eurpe.generation.make_llm_client`
+     so the offline-fallback path is honoured.
+  3. Build the workflow, run it, print a draft summary to stdout
+     (form depends on ``--render``).
+  4. Render the draft to Markdown via
+     :class:`~eurpe.generation.MarkdownCitationRenderer`.
+  5. Run :class:`~eurpe.generation.CitationAudit` against the draft +
+     rendered Markdown unless ``--no-audit`` is passed. Audit errors
+     print to stderr and exit 1 (release-blocking by design — see
+     ``audit.py`` module docstring for the rationale).
+  6. If ``--output`` is set, write the chosen artefacts atomically.
+
+* ``eurpe generate audit`` reads back a previously dumped
+  :class:`~eurpe.generation.GenerationDraft` JSON, re-renders it,
+  runs the audit, and exits 0 (clean) or 1 (failures). This is the
+  CI-friendly entry point for re-checking saved drafts without
+  re-running the LLM.
 
 The command lives in its own module so the ``eurpe.cli`` top-level
 file stays thin (matching the convention used for ``ingestion`` and
@@ -21,6 +33,7 @@ file stays thin (matching the convention used for ``ingestion`` and
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -33,9 +46,11 @@ from eurpe.config import (
     ensure_runtime_dirs,
     load_config,
 )
+from eurpe.generation.audit import AuditResult, CitationAudit
 from eurpe.generation.errors import GenerationError, LLMUnavailableError
 from eurpe.generation.llm import make_llm_client
-from eurpe.generation.models import GenerationRequest
+from eurpe.generation.models import GenerationDraft, GenerationRequest
+from eurpe.generation.render import MarkdownCitationRenderer
 from eurpe.generation.workflow import SectionGenerationWorkflow
 from eurpe.retrieval import (
     ChromaIndex,
@@ -107,6 +122,94 @@ def _print_draft(workflow_output) -> None:  # type: ignore[no-untyped-def]
         )
 
 
+def _print_audit_findings(result: AuditResult) -> None:
+    """Print audit findings to stderr — errors first, then warnings.
+
+    Using a single named function keeps the formatting consistent
+    between the ``section`` post-generation audit and the standalone
+    ``audit`` subcommand.
+    """
+
+    if result.passed and not result.warnings:
+        typer.echo("Audit: passed (no findings).", err=True)
+        return
+
+    typer.echo("Audit findings:", err=True)
+    for finding in result.errors:
+        cid_part = (
+            f"[{finding.citation_id}] " if finding.citation_id is not None else ""
+        )
+        typer.echo(
+            f"  ERROR ({finding.code}): {cid_part}{finding.message}",
+            err=True,
+        )
+    for finding in result.warnings:
+        cid_part = (
+            f"[{finding.citation_id}] " if finding.citation_id is not None else ""
+        )
+        typer.echo(
+            f"  warning ({finding.code}): {cid_part}{finding.message}",
+            err=True,
+        )
+
+    if result.passed:
+        typer.echo(
+            f"Audit: passed with {len(result.warnings)} warning(s).",
+            err=True,
+        )
+    else:
+        typer.echo(
+            f"Audit: FAILED — {len(result.errors)} error(s), "
+            f"{len(result.warnings)} warning(s).",
+            err=True,
+        )
+
+
+def _resolve_output_paths(
+    output: Path,
+    render_mode: str,
+) -> dict[str, Path]:
+    """Map ``--render`` value → output paths derived from ``--output``.
+
+    Suffix policy is opinionated and consistent across modes: the
+    rendered Markdown is always written to ``<base>.md`` and the JSON
+    dump to ``<base>.json``. The ``<base>`` is the user's ``--output``
+    path with any existing ``.md`` or ``.json`` suffix stripped (any
+    other suffix is preserved as part of the base).
+
+    Examples (matrix below holds for any ``base`` with no recognised
+    suffix; suffix-bearing inputs are normalised to the same shape):
+
+    * ``--render markdown --output draft``      → ``draft.md``
+    * ``--render markdown --output draft.json`` → ``draft.md`` (the
+      ``.json`` suffix is stripped because it would mislead the
+      reader; the user asked for Markdown)
+    * ``--render json --output draft.md``       → ``draft.json``
+    * ``--render both --output draft``          → both siblings
+    """
+
+    suffix = output.suffix.lower()
+    base = output.with_suffix("") if suffix in {".md", ".json"} else output
+    if render_mode == "markdown":
+        return {"markdown": base.with_suffix(".md")}
+    if render_mode == "json":
+        return {"json": base.with_suffix(".json")}
+    # both
+    return {
+        "markdown": base.with_suffix(".md"),
+        "json": base.with_suffix(".json"),
+    }
+
+
+def _atomic_write(path: Path, content: str) -> None:
+    """Atomic write: temp + ``Path.replace``. Mirrors the ingestion CLI."""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_suffix(path.suffix + ".tmp")
+    tmp_path.write_text(content, encoding="utf-8")
+    tmp_path.replace(path)
+
+
 @generate_app.command("section")
 def section(
     section_type: str = typer.Option(
@@ -175,20 +278,43 @@ def section(
         "--no-esr",
         help="Exclude ESR (External Subject Reviewer) notes from retrieval.",
     ),
+    render: str = typer.Option(
+        "both",
+        "--render",
+        "-r",
+        help=(
+            "What to emit. ``markdown`` prints a rendered Markdown "
+            "document with status badges; ``json`` prints the raw "
+            "GenerationDraft summary; ``both`` (default) prints "
+            "Markdown to stdout and writes both .md + .json siblings "
+            "when --output is set."
+        ),
+    ),
+    no_audit: bool = typer.Option(
+        False,
+        "--no-audit",
+        help=(
+            "Skip the post-generation citation audit. By default, the "
+            "audit runs on every draft and fails the command if any "
+            "citation is missing a status tag, references an "
+            "unknown marker, or the rendered output drops a badge."
+        ),
+    ),
     output: Path | None = typer.Option(
         None,
         "--output",
         "-o",
         help=(
-            "Path to write a JSON dump of the GenerationDraft. Atomic; "
-            "will not clobber an existing file unless --overwrite is set."
+            "Path to write the rendered artefacts. Atomic; will not "
+            "clobber an existing file unless --overwrite is set. The "
+            "exact files written depend on --render."
         ),
     ),
     overwrite: bool = typer.Option(
         False,
         "--overwrite",
         "-f",
-        help="Overwrite an existing --output file.",
+        help="Overwrite existing --output files.",
     ),
     config_path: Path = typer.Option(
         DEFAULT_CONFIG_PATH,
@@ -225,6 +351,15 @@ def section(
             err=True,
         )
         raise typer.Exit(code=1) from exc
+
+    render_mode = render.lower()
+    if render_mode not in {"markdown", "json", "both"}:
+        typer.echo(
+            f"error: --render must be one of ['markdown', 'json', 'both'], "
+            f"got {render!r}",
+            err=True,
+        )
+        raise typer.Exit(code=1)
 
     used_path = ensure_config_file(config_path, EXAMPLE_CONFIG_PATH)
     cfg = load_config(used_path).resolve_paths()
@@ -274,26 +409,103 @@ def section(
         typer.echo(f"error: generation failed: {exc}", err=True)
         raise typer.Exit(code=1) from exc
 
+    renderer = MarkdownCitationRenderer()
+    rendered_md = renderer.render(draft)
+
     typer.echo("")
-    _print_draft(draft)
+    if render_mode in {"markdown", "both"}:
+        # Markdown form for the human reader. The plaintext draft
+        # summary is still emitted under the 'json' branch so test
+        # tooling that asserts on "Generated draft" / "Citations"
+        # markers continues to work.
+        typer.echo(rendered_md)
+    if render_mode == "json":
+        _print_draft(draft)
+
+    # Audit BEFORE writing output: a draft that fails the audit should
+    # not be persisted to disk (otherwise the user might pick it up
+    # later thinking it passed).
+    if not no_audit:
+        audit_result = CitationAudit().audit_rendered(draft, rendered_md)
+        _print_audit_findings(audit_result)
+        if not audit_result.passed:
+            raise typer.Exit(code=1)
 
     if output is not None:
-        if output.exists() and not overwrite:
-            typer.echo(
-                f"error: output file already exists: {output} "
-                "(pass --overwrite/-f to replace it)",
-                err=True,
+        target_paths = _resolve_output_paths(output, render_mode)
+        # Pre-flight: refuse to clobber any of the targets unless
+        # --overwrite is set. Doing this before writing avoids the
+        # half-written state where ``.md`` was written but ``.json``
+        # already existed.
+        for path in target_paths.values():
+            if path.exists() and not overwrite:
+                typer.echo(
+                    f"error: output file already exists: {path} "
+                    "(pass --overwrite/-f to replace it)",
+                    err=True,
+                )
+                raise typer.Exit(code=1)
+
+        for kind, path in target_paths.items():
+            content = (
+                rendered_md
+                if kind == "markdown"
+                else draft.model_dump_json(indent=2)
             )
-            raise typer.Exit(code=1)
-        # Atomic write: temp + Path.replace. Mirrors the pattern in
-        # ``eurpe ingest``. ``parent.mkdir(...)`` so the user can pass
-        # an output path in a directory that doesn't exist yet.
-        output.parent.mkdir(parents=True, exist_ok=True)
-        tmp_path = output.with_suffix(output.suffix + ".tmp")
-        tmp_path.write_text(draft.model_dump_json(indent=2), encoding="utf-8")
-        tmp_path.replace(output)
-        typer.echo("")
-        typer.echo(f"  wrote         : {output}")
+            _atomic_write(path, content)
+            typer.echo("")
+            typer.echo(f"  wrote {kind:8s}: {path}")
 
     sys.stdout.flush()
     raise typer.Exit(code=0)
+
+
+@generate_app.command("audit")
+def audit(
+    draft_path: Path = typer.Argument(
+        ...,
+        exists=True,
+        file_okay=True,
+        dir_okay=False,
+        readable=True,
+        help=(
+            "Path to a previously dumped GenerationDraft JSON file "
+            "(e.g., one produced by ``eurpe generate section --output``)."
+        ),
+    ),
+) -> None:
+    """Re-render a saved draft and run the citation audit on it.
+
+    Exits 0 if the audit passes; exits 1 with findings on stderr if
+    any error finding is recorded. CI-friendly entry point for
+    re-checking saved drafts without re-running the LLM.
+    """
+
+    try:
+        payload = json.loads(draft_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        typer.echo(
+            f"error: {draft_path} is not valid JSON: {exc}",
+            err=True,
+        )
+        raise typer.Exit(code=1) from exc
+
+    try:
+        draft = GenerationDraft.model_validate(payload)
+    except Exception as exc:  # pragma: no cover - pydantic surfaces a clean message
+        typer.echo(
+            f"error: {draft_path} does not match the GenerationDraft schema: {exc}",
+            err=True,
+        )
+        raise typer.Exit(code=1) from exc
+
+    rendered_md = MarkdownCitationRenderer().render(draft)
+    result = CitationAudit().audit_rendered(draft, rendered_md)
+
+    typer.echo(
+        f"Audit summary for {draft_path}: "
+        f"{len(result.errors)} error(s), {len(result.warnings)} warning(s)."
+    )
+    _print_audit_findings(result)
+
+    raise typer.Exit(code=0 if result.passed else 1)
