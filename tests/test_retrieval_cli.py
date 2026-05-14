@@ -76,7 +76,13 @@ def _seed_index_with_fixtures(tmp_path: Path, *, collection: str = "default") ->
 
 
 def test_index_query_cli_returns_results_for_marker_token(tmp_path: Path) -> None:
-    """``eurpe index query`` returns the funded fixture for its marker token."""
+    """``eurpe index query`` returns the funded fixture for its marker token.
+
+    The DeterministicHashEmbedder produces modest cosine scores that
+    sit below the policy's 0.30 default threshold, so we lower
+    ``--threshold`` to exercise the retrieval path itself rather than
+    accidentally test the threshold gate.
+    """
 
     cfg_path = _write_offline_config(tmp_path)
     _seed_index_with_fixtures(tmp_path)
@@ -90,6 +96,8 @@ def test_index_query_cli_returns_results_for_marker_token(tmp_path: Path) -> Non
             query_text_for("funded_horizon_europe.yaml"),
             "--top-k",
             "3",
+            "--threshold",
+            "0.0",
             "--config",
             str(cfg_path),
         ],
@@ -114,6 +122,8 @@ def test_index_query_cli_with_status_filter_excludes_non_matching(tmp_path: Path
             "5",
             "--source-status",
             "rejected",
+            "--threshold",
+            "0.0",
             "--config",
             str(cfg_path),
         ],
@@ -121,6 +131,115 @@ def test_index_query_cli_with_status_filter_excludes_non_matching(tmp_path: Path
     assert result.exit_code == 0, result.output
     # With the rejected filter, no funded chunk should appear.
     assert "status=funded" not in result.output
+
+
+def test_index_query_cli_shows_policy_reason_column(tmp_path: Path) -> None:
+    """Output of ``eurpe index query`` includes the ``policy_reason=`` field."""
+
+    cfg_path = _write_offline_config(tmp_path)
+    _seed_index_with_fixtures(tmp_path)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "index",
+            "query",
+            query_text_for("funded_horizon_europe.yaml"),
+            "--top-k",
+            "3",
+            "--threshold",
+            "0.0",
+            "--config",
+            str(cfg_path),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert "policy_reason=" in result.output
+    # The funded marker query should land at least one funded_primary row.
+    assert "policy_reason=funded_primary" in result.output
+
+
+def test_index_query_cli_lessons_learned_flag_marks_rejected(tmp_path: Path) -> None:
+    """``--lessons-learned`` surfaces rejected results with the lessons_learned reason.
+
+    The fixture corpus has exactly one rejected chunk; under
+    lessons-learned mode it should appear with ``policy_reason=lessons_learned_mode``
+    even though the default policy with its rejected-fraction cap (0.4 of
+    top_k=5 → 2 allowed) wouldn't normally privilege it.
+    """
+
+    cfg_path = _write_offline_config(tmp_path)
+    _seed_index_with_fixtures(tmp_path)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "index",
+            "query",
+            query_text_for("rejected_horizon_2020.yaml"),
+            "--top-k",
+            "5",
+            "--threshold",
+            "0.0",
+            "--lessons-learned",
+            "--config",
+            str(cfg_path),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert "status=rejected" in result.output
+    assert "policy_reason=lessons_learned_mode" in result.output
+
+
+def test_index_query_cli_no_esr_excludes_esr(tmp_path: Path) -> None:
+    """``--no-esr`` removes ESR notes from the result list."""
+
+    cfg_path = _write_offline_config(tmp_path)
+    _seed_index_with_fixtures(tmp_path)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "index",
+            "query",
+            query_text_for("esr_note_horizon_europe.yaml"),
+            "--top-k",
+            "5",
+            "--threshold",
+            "0.0",
+            "--no-esr",
+            "--config",
+            str(cfg_path),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert "status=esr_note" not in result.output
+
+
+def test_index_query_cli_rejects_invalid_source_status(tmp_path: Path) -> None:
+    """An unknown ``--source-status`` value exits non-zero with a helpful message."""
+
+    cfg_path = _write_offline_config(tmp_path)
+    _seed_index_with_fixtures(tmp_path)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "index",
+            "query",
+            "anything",
+            "--source-status",
+            "not-a-real-status",
+            "--config",
+            str(cfg_path),
+        ],
+    )
+    assert result.exit_code == 1
+    assert "--source-status" in result.output
 
 
 def test_index_query_cli_handles_no_results_gracefully(tmp_path: Path) -> None:
@@ -141,6 +260,8 @@ def test_index_query_cli_handles_no_results_gracefully(tmp_path: Path) -> None:
             # A programme that no fixture uses → empty intersection.
             "--programme",
             "horizon_2020",
+            "--threshold",
+            "0.0",
             "--config",
             str(cfg_path),
         ],

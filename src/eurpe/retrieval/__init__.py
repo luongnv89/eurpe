@@ -36,6 +36,11 @@ from eurpe.retrieval.errors import (
 )
 from eurpe.retrieval.index import ChromaIndex
 from eurpe.retrieval.models import Chunk
+from eurpe.retrieval.retriever import (
+    RetrievalPolicy,
+    RetrievalResult,
+    SourceStatusAwareRetriever,
+)
 
 __all__ = [
     "Chunk",
@@ -47,6 +52,9 @@ __all__ = [
     "IndexingError",
     "OfflineEmbeddingError",
     "OllamaEmbedder",
+    "RetrievalPolicy",
+    "RetrievalResult",
+    "SourceStatusAwareRetriever",
     "infer_section_type",
     "make_embedder",
 ]

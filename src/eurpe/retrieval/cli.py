@@ -39,7 +39,12 @@ from eurpe.retrieval.embeddings import make_embedder
 from eurpe.retrieval.errors import IndexingError
 from eurpe.retrieval.index import ChromaIndex
 from eurpe.retrieval.models import Chunk
-from eurpe.schema import ProposalMetadata
+from eurpe.retrieval.retriever import (
+    RetrievalPolicy,
+    RetrievalResult,
+    SourceStatusAwareRetriever,
+)
+from eurpe.schema import Programme, ProposalMetadata, SourceStatus
 
 # A sub-Typer so the CLI surface is ``eurpe index build`` /
 # ``eurpe index query``. Wired into the top-level app in
@@ -93,6 +98,14 @@ def _format_snippet(text: str, *, max_chars: int = 200) -> str:
 def _print_query_results(
     results: Iterable[tuple[Chunk, float]], *, max_chars: int = 200
 ) -> None:
+    """Legacy formatter for raw ``(chunk, score)`` tuples.
+
+    Kept around for any callers that still consume ``ChromaIndex.query``
+    output directly (none today inside the CLI). The retriever-driven
+    path uses :func:`_print_retrieval_results` instead, which surfaces
+    the policy_reason column.
+    """
+
     rows = list(enumerate(results, start=1))
     if not rows:
         typer.echo("(no results)")
@@ -108,6 +121,34 @@ def _print_query_results(
             f"page={page}"
         )
         typer.echo(f"     {_format_snippet(chunk.text, max_chars=max_chars)}")
+
+
+def _print_retrieval_results(
+    results: Iterable[RetrievalResult], *, max_chars: int = 200
+) -> None:
+    """Print results returned by :class:`SourceStatusAwareRetriever`.
+
+    Adds a ``policy_reason=`` column so an operator can immediately tell
+    why each chunk was kept (funded_primary, rejected_threshold_met,
+    lessons_learned_mode, esr_advisory, unknown_low_confidence).
+    """
+
+    rows = list(results)
+    if not rows:
+        typer.echo("(no results)")
+        return
+    for r in rows:
+        meta = r.chunk.metadata
+        page = meta.anchor.page if meta.anchor.page is not None else "?"
+        typer.echo(
+            f"#{r.rank} [{r.score:+.4f}] "
+            f"status={meta.source_status.value} "
+            f"policy_reason={r.policy_reason} "
+            f"programme={meta.proposal.programme.value} "
+            f"call={meta.proposal.call_id} "
+            f"page={page}"
+        )
+        typer.echo(f"     {_format_snippet(r.chunk.text, max_chars=max_chars)}")
 
 
 @index_app.command("build")
@@ -198,12 +239,55 @@ def query(
     source_status: str | None = typer.Option(
         None,
         "--source-status",
-        help="Filter by source status (funded | rejected | esr_note | unknown).",
+        help=(
+            "Hard-filter by source status (funded | rejected | esr_note | unknown). "
+            "Forwarded as a Chroma where clause; the source-status policy still "
+            "applies on top of the filtered candidate pool."
+        ),
     ),
     programme: str | None = typer.Option(
         None,
         "--programme",
         help="Filter by programme (e.g., horizon_europe).",
+    ),
+    threshold: float = typer.Option(
+        0.30,
+        "--threshold",
+        min=0.0,
+        max=1.0,
+        help=(
+            "Minimum cosine similarity for a chunk to be considered topically "
+            "relevant. Applied uniformly to all source statuses."
+        ),
+    ),
+    lessons_learned: bool = typer.Option(
+        False,
+        "--lessons-learned",
+        help=(
+            "Enable lessons-learned mode: relax the rejected threshold by "
+            "--rejected-offset and skip the rejected-fraction cap so cautionary "
+            "examples are surfaced more aggressively."
+        ),
+    ),
+    rejected_offset: float = typer.Option(
+        -0.10,
+        "--rejected-offset",
+        min=-0.5,
+        max=0.5,
+        help=(
+            "Offset added to --threshold for REJECTED chunks under "
+            "--lessons-learned. Typically negative (default -0.10) to relax the "
+            "bar. Ignored without --lessons-learned."
+        ),
+    ),
+    no_esr: bool = typer.Option(
+        False,
+        "--no-esr",
+        help=(
+            "Exclude ESR (External Subject Reviewer) notes entirely. Use when "
+            "drafting the final version where subjective commentary should not "
+            "leak into the retrieved evidence."
+        ),
     ),
     config_path: Path = typer.Option(
         DEFAULT_CONFIG_PATH,
@@ -223,7 +307,17 @@ def query(
         help="Max characters of each result's text snippet.",
     ),
 ) -> None:
-    """Query the local index and print the top results."""
+    """Query the local index applying the source-status policy.
+
+    Drives :class:`~eurpe.retrieval.retriever.SourceStatusAwareRetriever`
+    so the same policy used by the proposal-drafting pipeline is what an
+    operator sees when probing the index from the command line.
+
+    The optional ``--source-status`` and ``--programme`` flags become
+    hard server-side filters on the Chroma collection; the policy
+    (threshold, funded-first ordering, rejected cap, ESR handling) then
+    runs on top of the filtered pool.
+    """
 
     used_path = ensure_config_file(config_path, EXAMPLE_CONFIG_PATH)
     cfg = load_config(used_path).resolve_paths()
@@ -236,26 +330,45 @@ def query(
         collection_name=collection,
     )
 
-    # Chroma 1.x expects ``{"key": "value"}`` for a single filter and
-    # ``{"$and": [{"key": "v1"}, {"key2": "v2"}]}`` for multiple. Build
-    # the right shape based on how many filters the caller passed.
-    filters: list[dict[str, str]] = []
-    if source_status:
-        filters.append({"source_status": source_status})
-    if programme:
-        filters.append({"proposal.programme": programme})
-    where: dict[str, object] | None
-    if not filters:
-        where = None
-    elif len(filters) == 1:
-        where = filters[0]
-    else:
-        where = {"$and": filters}
+    # Coerce CLI string flags into the typed enums the retriever expects.
+    # Invalid values surface a friendly error here rather than as an
+    # opaque KeyError deep in the retriever.
+    try:
+        status_enum = SourceStatus(source_status) if source_status else None
+    except ValueError as exc:
+        typer.echo(
+            f"error: --source-status must be one of "
+            f"{[s.value for s in SourceStatus]}, got {source_status!r}",
+            err=True,
+        )
+        raise typer.Exit(code=1) from exc
+    try:
+        programme_enum = Programme(programme) if programme else None
+    except ValueError as exc:
+        typer.echo(
+            f"error: --programme must be one of "
+            f"{[p.value for p in Programme]}, got {programme!r}",
+            err=True,
+        )
+        raise typer.Exit(code=1) from exc
+
+    policy = RetrievalPolicy(
+        relevance_threshold=threshold,
+        lessons_learned_mode=lessons_learned,
+        rejected_threshold_offset=rejected_offset,
+        include_esr=not no_esr,
+    )
+    retriever = SourceStatusAwareRetriever(index, policy=policy)
 
     try:
-        results = index.query(text, top_k=top_k, where=where)
+        results = retriever.retrieve(
+            text,
+            top_k=top_k,
+            programme=programme_enum,
+            source_status=status_enum,
+        )
     except IndexingError as exc:
         typer.echo(f"error: query failed: {exc}", err=True)
         raise typer.Exit(code=1) from exc
 
-    _print_query_results(results, max_chars=snippet_chars)
+    _print_retrieval_results(results, max_chars=snippet_chars)
