@@ -12,12 +12,16 @@ flow:
 3. ``eurpe index query <probe> --collection <stem> --threshold 0.0``
    — round-trip the retriever to prove the index is populated and
    queryable.
-4. ``eurpe generate section --type methodology --output <base>``
-   — generate a methodology draft using indexed evidence; emits both
-   ``<base>.md`` and ``<base>.json``.
+4. ``eurpe generate section --type methodology --output <base>
+   --no-audit`` — generate a methodology draft using indexed
+   evidence; emits both ``<base>.md`` and ``<base>.json``. The
+   in-band audit is suppressed here so step 5 owns the audit verdict
+   and the caller can assert on its exit code in both directions
+   (issue #45 AC3).
 5. ``eurpe generate audit <base>.json`` — explicit, separate audit
    pass that satisfies AC4's "citations/audit output is produced"
-   bullet alongside the in-band audit summary from step 4.
+   bullet. The exit code is captured into ``audit_exit_code`` rather
+   than raised, so the caller can verify both pass and fail paths.
 
 The orchestrator returns a structured artefact dict so the test can
 make pointed assertions without re-parsing CLI output. Every CLI step's
@@ -198,6 +202,12 @@ def run_full_pipeline(
     query_hits = _count_query_hits(query_result.output)
 
     # ----- 4. generate section -----
+    # Pass --no-audit to step 4 so the in-band audit does not pre-empt
+    # the explicit audit pass in step 5. The two-step shape lets the
+    # caller assert on the audit outcome in both directions (issue #45
+    # AC3): the test treats the audit verdict — not the CLI's exit code
+    # — as the contract being verified. Step 5 below runs the audit
+    # explicitly and the test asserts on its exit code.
     draft_base = run_dir / pdf_path.stem
     generate_result = runner.invoke(
         app,
@@ -212,6 +222,7 @@ def run_full_pipeline(
             "0.0",
             "--render",
             "both",
+            "--no-audit",
             "--output",
             str(draft_base),
             "--overwrite",
@@ -231,22 +242,25 @@ def run_full_pipeline(
     generated_json_path = draft_base.with_suffix(".json")
 
     # ----- 5. generate audit (explicit re-check) -----
+    # Issue #45 AC3: the audit MUST report passed only when the rendered
+    # draft contains at least one citation row tied to a real chunk. We
+    # capture the exit code into artefacts and let the caller assert
+    # the invariant in both directions (a draft with no citations must
+    # exit 1 with a clear finding; a draft with citations must exit 0).
     audit_result = runner.invoke(
         app,
         ["generate", "audit", str(generated_json_path)],
     )
     _append_log(log_path, "generate audit", audit_result.output)
-    if audit_result.exit_code != 0:
-        raise AssertionError(
-            f"generate audit failed (exit={audit_result.exit_code}) "
-            f"for {generated_json_path}:\n{audit_result.output}"
-        )
 
     # Persist a JSON wrapper of the audit output so AC5 ("audit output
     # written to a deterministic location") is satisfied verbatim.
     audit_json_path = run_dir / "audit.json"
     audit_json_path.write_text(
-        json.dumps({"output": audit_result.output}, indent=2),
+        json.dumps(
+            {"output": audit_result.output, "exit_code": audit_result.exit_code},
+            indent=2,
+        ),
         encoding="utf-8",
     )
 
@@ -260,6 +274,7 @@ def run_full_pipeline(
         "metadata_yaml_path": metadata_yaml_path,
         "audit_json_path": audit_json_path,
         "audit_summary": audit_result.output,
+        "audit_exit_code": audit_result.exit_code,
         "ingest_output": ingest_result.output,
         "build_output": build_result.output,
         "query_output": query_result.output,

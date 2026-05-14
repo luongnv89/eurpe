@@ -65,7 +65,7 @@ def test_full_pipeline(pdf_path: Path, tmp_path: Path) -> None:
     default, overridable via ``EURPE_E2E_OUTPUT_DIR``. The latter is
     what CI workflows can set to publish artefacts.
 
-    Assertions cover AC4:
+    Assertions cover AC4 (issue #43):
 
     * parsed chunks > 0 (from ``index build`` summary)
     * index populated (``collection_count > 0``)
@@ -74,8 +74,18 @@ def test_full_pipeline(pdf_path: Path, tmp_path: Path) -> None:
       every probe well — the *contract* that retrieval ran is what
       matters, not the count)
     * at least one section generated (Markdown + JSON exist)
-    * citations / audit output produced (audit JSON file + ``Audit:``
-      summary line in stderr)
+    * citations / audit output produced (audit JSON file present;
+      step 4's in-band audit is suppressed via ``--no-audit`` so the
+      explicit ``generate audit`` subcommand owns the verdict — see
+      the AC3 invariant below)
+
+    Plus AC3 (issue #45):
+
+    * audit reports ``passed`` only when the rendered Markdown
+      contains at least one citation row tied to a real chunk. When
+      the audit fails the saved summary names a specific finding code
+      (e.g., ``placeholder_text``, ``no_evidence_escape``) so an
+      operator can act.
     """
 
     # Per-PDF run directory under either tmp_path (default) or the
@@ -132,15 +142,46 @@ def test_full_pipeline(pdf_path: Path, tmp_path: Path) -> None:
         f"unexpected section_type in {json_path}: {payload.get('section_type')!r}"
     )
 
-    # AC4 — citations / audit output produced. The ``section`` command's
-    # in-band audit prints ``Audit:`` to stderr; the explicit ``audit``
-    # subcommand re-checks the saved draft and writes audit.json.
-    assert "Audit:" in artefacts["generate_output"], (
-        "no 'Audit:' summary line in generate-section output; the "
-        "in-band audit may have been silently skipped:\n"
-        f"{artefacts['generate_output']}"
-    )
+    # AC4 — citations / audit output produced. The explicit ``audit``
+    # subcommand re-checks the saved draft and writes audit.json. The
+    # in-band audit in step 4 is suppressed via ``--no-audit`` so the
+    # caller can assert on the explicit audit's exit code below.
     assert artefacts["audit_json_path"].exists()
+
+    # Issue #45 AC3 — the audit summary must report passed only when
+    # the rendered draft contains at least one citation row tied to a
+    # real chunk. The contract holds in both directions:
+    #
+    # * passed (exit 0) ⇒ the rendered Markdown contains ``| 1 |``
+    #   table-row marker (one row per cited chunk).
+    # * not passed (exit 1) ⇒ the rendered Markdown either has no
+    #   citation rows, or it contains a placeholder/escape sentence
+    #   the audit gate rejects; the audit summary names the finding.
+    audit_exit = artefacts["audit_exit_code"]
+    audit_summary = artefacts["audit_summary"]
+    has_citation_row = "| 1 |" in md_text
+    if audit_exit == 0:
+        assert "passed (no findings)" in audit_summary or "passed with" in audit_summary, (
+            f"audit reported exit 0 but the summary doesn't mark it passed:\n{audit_summary}"
+        )
+        assert has_citation_row, (
+            "audit passed but the rendered Markdown has no citation row — "
+            "issue #45 AC3 requires at least one ``| 1 |`` row when audit passes:\n"
+            f"{md_text[:1200]}"
+        )
+    else:
+        assert "Audit findings" in audit_summary, (
+            f"audit exit was {audit_exit} but no 'Audit findings' header was emitted:\n"
+            f"{audit_summary}"
+        )
+        # The failing audit must name a specific finding code so the
+        # operator can act. The two new gates from issue #45 are
+        # ``no_evidence_escape`` and ``placeholder_text``; the older
+        # gates (``missing_status``, ``bad_render``, ...) are valid
+        # too. Just require the format ``ERROR (<code>):``.
+        assert "ERROR (" in audit_summary, (
+            f"audit failure did not name an ERROR code:\n{audit_summary}"
+        )
 
     # AC5 — deterministic location: the pipeline log is in the run dir.
     assert (run_dir / "pipeline.log").exists()

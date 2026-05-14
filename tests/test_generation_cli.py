@@ -43,6 +43,12 @@ def test_generate_section_cli_produces_draft(tmp_path: Path) -> None:
     The default ``--render`` is ``both``; on stdout that prints the
     rendered Markdown form (heading + body + references). The JSON
     form is written under ``--output`` only.
+
+    ``--no-audit`` is passed because the deterministic-stub LLM (the
+    one exercised in tests) emits the canary placeholder sentence that
+    the issue #45 audit gate rejects on purpose. The test is about
+    drafting + rendering plumbing, not the audit; the audit contract
+    is exercised independently in ``test_cli_section_audit_*``.
     """
 
     cfg_path = _write_offline_config(tmp_path)
@@ -60,6 +66,7 @@ def test_generate_section_cli_produces_draft(tmp_path: Path) -> None:
             "Describe our deep learning approach for methodology",
             "--threshold",
             "0.0",
+            "--no-audit",
             "--config",
             str(cfg_path),
         ],
@@ -75,6 +82,10 @@ def test_generate_section_cli_runs_with_unreachable_ollama_offline(tmp_path: Pat
 
     The config points at ``http://localhost:1`` which never has a
     listener; the factory must fall back to DeterministicLLMClient.
+
+    ``--no-audit`` skips the issue #45 placeholder gate, which would
+    otherwise reject the stub output. The point of this test is the
+    factory fallback, not the audit verdict.
     """
 
     cfg_path = _write_offline_config(tmp_path)
@@ -92,6 +103,7 @@ def test_generate_section_cli_runs_with_unreachable_ollama_offline(tmp_path: Pat
             "Methodology draft",
             "--threshold",
             "0.0",
+            "--no-audit",
             "--config",
             str(cfg_path),
         ],
@@ -101,13 +113,17 @@ def test_generate_section_cli_runs_with_unreachable_ollama_offline(tmp_path: Pat
     assert "deterministic-stub-v1" in result.output
 
 
-def test_generate_section_cli_with_empty_index(tmp_path: Path) -> None:
-    """Empty index → CLI still emits a draft + a "no citations" notice.
+def test_generate_section_cli_with_empty_index_fails_audit(tmp_path: Path) -> None:
+    """Empty index → audit gates the draft and the CLI exits 1.
 
-    Under the default ``--render both`` the rendered Markdown is what
-    lands on stdout; the renderer's "no citations" placeholder is
-    ``_No citations._`` (italic Markdown so a casual reader can't miss
-    it).
+    Pre-issue-#45 contract: the CLI emitted a draft with the
+    deterministic stub's "no retrieved evidence" sentence, an empty
+    citation table, and exited 0 — the audit passed silently. That is
+    the silent-quality-failure the issue #43 E2E harness surfaced.
+
+    Post-issue-#45 contract: the audit fires ``no_evidence_escape``
+    and the CLI exits 1. The audit summary names the failure so an
+    operator can act.
     """
 
     cfg_path = _write_offline_config(tmp_path)
@@ -129,13 +145,50 @@ def test_generate_section_cli_with_empty_index(tmp_path: Path) -> None:
             str(cfg_path),
         ],
     )
+    assert result.exit_code == 1, result.output
+    assert "no_evidence_escape" in result.output
+
+
+def test_generate_section_cli_with_empty_index_no_audit_still_emits_draft(
+    tmp_path: Path,
+) -> None:
+    """``--no-audit`` preserves the pre-issue-#45 behaviour for diagnostics.
+
+    Operators inspecting why retrieval returned nothing still need to
+    see the draft + the rendered "_No citations._" placeholder. The
+    flag exists for exactly this kind of triage.
+    """
+
+    cfg_path = _write_offline_config(tmp_path)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "generate",
+            "section",
+            "--type",
+            "methodology",
+            "--intent",
+            "Methodology draft",
+            "--threshold",
+            "0.0",
+            "--no-audit",
+            "--config",
+            str(cfg_path),
+        ],
+    )
     assert result.exit_code == 0, result.output
     assert "# Methodology" in result.output
     assert "_No citations._" in result.output
 
 
 def test_generate_section_cli_writes_output_atomically(tmp_path: Path) -> None:
-    """``--output`` writes a valid JSON dump of the GenerationDraft."""
+    """``--output`` writes a valid JSON dump of the GenerationDraft.
+
+    ``--no-audit`` skips the stub-placeholder gate; the test is about
+    atomic output writing, not the audit verdict.
+    """
 
     cfg_path = _write_offline_config(tmp_path)
     _seed_index_with_fixtures(tmp_path)
@@ -153,6 +206,7 @@ def test_generate_section_cli_writes_output_atomically(tmp_path: Path) -> None:
             "Describe our DL approach",
             "--threshold",
             "0.0",
+            "--no-audit",
             "--output",
             str(out_path),
             "--config",
@@ -174,7 +228,11 @@ def test_generate_section_cli_writes_output_atomically(tmp_path: Path) -> None:
 def test_generate_section_cli_refuses_to_overwrite_existing_output(
     tmp_path: Path,
 ) -> None:
-    """Without ``--overwrite``, an existing output file is preserved."""
+    """Without ``--overwrite``, an existing output file is preserved.
+
+    ``--no-audit`` so the test exercises the overwrite preflight
+    rather than tripping the stub-placeholder audit gate first.
+    """
 
     cfg_path = _write_offline_config(tmp_path)
     _seed_index_with_fixtures(tmp_path)
@@ -193,6 +251,7 @@ def test_generate_section_cli_refuses_to_overwrite_existing_output(
             "Describe our DL approach",
             "--threshold",
             "0.0",
+            "--no-audit",
             "--output",
             str(out_path),
             "--config",
@@ -206,7 +265,11 @@ def test_generate_section_cli_refuses_to_overwrite_existing_output(
 
 
 def test_generate_section_cli_overwrite_flag_replaces_output(tmp_path: Path) -> None:
-    """``--overwrite`` allows clobbering an existing output file."""
+    """``--overwrite`` allows clobbering an existing output file.
+
+    ``--no-audit`` so the stub-placeholder audit gate does not
+    pre-empt the overwrite-path assertion.
+    """
 
     cfg_path = _write_offline_config(tmp_path)
     _seed_index_with_fixtures(tmp_path)
@@ -225,6 +288,7 @@ def test_generate_section_cli_overwrite_flag_replaces_output(tmp_path: Path) -> 
             "Describe our DL approach",
             "--threshold",
             "0.0",
+            "--no-audit",
             "--output",
             str(out_path),
             "--overwrite",
@@ -238,7 +302,11 @@ def test_generate_section_cli_overwrite_flag_replaces_output(tmp_path: Path) -> 
 
 
 def test_generate_section_cli_supports_context_from_file(tmp_path: Path) -> None:
-    """``--context @path`` reads call context from disk and injects it into the prompt."""
+    """``--context @path`` reads call context from disk and injects it into the prompt.
+
+    ``--no-audit`` so the stub-placeholder gate does not pre-empt the
+    context-injection assertion.
+    """
 
     cfg_path = _write_offline_config(tmp_path)
     _seed_index_with_fixtures(tmp_path)
@@ -263,6 +331,7 @@ def test_generate_section_cli_supports_context_from_file(tmp_path: Path) -> None
             f"@{ctx_path}",
             "--threshold",
             "0.0",
+            "--no-audit",
             "--output",
             str(out_path),
             "--config",
@@ -322,7 +391,12 @@ def test_generate_section_cli_rejects_invalid_programme(tmp_path: Path) -> None:
 
 
 def test_generate_section_cli_lessons_learned_flag(tmp_path: Path) -> None:
-    """``--lessons-learned`` runs without error (observable behaviour is in workflow tests)."""
+    """``--lessons-learned`` runs without error.
+
+    Observable retrieval behaviour is covered in workflow tests;
+    ``--no-audit`` skips the stub-placeholder gate that would
+    otherwise pre-empt the assertion.
+    """
 
     cfg_path = _write_offline_config(tmp_path)
     _seed_index_with_fixtures(tmp_path)
@@ -340,6 +414,7 @@ def test_generate_section_cli_lessons_learned_flag(tmp_path: Path) -> None:
             "--lessons-learned",
             "--threshold",
             "0.0",
+            "--no-audit",
             "--config",
             str(cfg_path),
         ],
@@ -348,7 +423,11 @@ def test_generate_section_cli_lessons_learned_flag(tmp_path: Path) -> None:
 
 
 def test_generate_section_cli_no_esr_flag(tmp_path: Path) -> None:
-    """``--no-esr`` runs without error and excludes ESR notes from citations."""
+    """``--no-esr`` runs without error and excludes ESR notes from citations.
+
+    ``--no-audit`` skips the stub-placeholder gate; the assertion
+    targets the citation-status set, not the audit verdict.
+    """
 
     cfg_path = _write_offline_config(tmp_path)
     _seed_index_with_fixtures(tmp_path)
@@ -367,6 +446,7 @@ def test_generate_section_cli_no_esr_flag(tmp_path: Path) -> None:
             "--no-esr",
             "--threshold",
             "0.0",
+            "--no-audit",
             "--output",
             str(out_path),
             "--config",
@@ -381,7 +461,11 @@ def test_generate_section_cli_no_esr_flag(tmp_path: Path) -> None:
 
 
 def test_generate_section_cli_top_k_caps_evidence(tmp_path: Path) -> None:
-    """``--top-k`` limits the number of citations on the resulting draft."""
+    """``--top-k`` limits the number of citations on the resulting draft.
+
+    ``--no-audit`` skips the stub-placeholder gate; the assertion
+    targets the citation count, not the audit verdict.
+    """
 
     cfg_path = _write_offline_config(tmp_path)
     _seed_index_with_fixtures(tmp_path)
@@ -401,6 +485,7 @@ def test_generate_section_cli_top_k_caps_evidence(tmp_path: Path) -> None:
             "2",
             "--threshold",
             "0.0",
+            "--no-audit",
             "--output",
             str(out_path),
             "--config",
@@ -521,7 +606,11 @@ def _write_dirty_draft(tmp_path: Path) -> Path:
 
 
 def test_cli_renders_markdown_when_render_markdown(tmp_path: Path) -> None:
-    """``--render markdown`` emits a Markdown document with a ``## References`` block."""
+    """``--render markdown`` emits a Markdown document with a ``## References`` block.
+
+    ``--no-audit`` so the stub-placeholder audit gate does not
+    pre-empt the render-mode assertion.
+    """
 
     cfg_path = _write_offline_config(tmp_path)
     _seed_index_with_fixtures(tmp_path)
@@ -540,6 +629,7 @@ def test_cli_renders_markdown_when_render_markdown(tmp_path: Path) -> None:
             "0.0",
             "--render",
             "markdown",
+            "--no-audit",
             "--config",
             str(cfg_path),
         ],
@@ -552,7 +642,11 @@ def test_cli_renders_markdown_when_render_markdown(tmp_path: Path) -> None:
 
 
 def test_cli_renders_json_summary_when_render_json(tmp_path: Path) -> None:
-    """``--render json`` emits the plaintext draft summary, not Markdown."""
+    """``--render json`` emits the plaintext draft summary, not Markdown.
+
+    ``--no-audit`` so the stub-placeholder audit gate does not
+    pre-empt the render-mode assertion.
+    """
 
     cfg_path = _write_offline_config(tmp_path)
     _seed_index_with_fixtures(tmp_path)
@@ -571,6 +665,7 @@ def test_cli_renders_json_summary_when_render_json(tmp_path: Path) -> None:
             "0.0",
             "--render",
             "json",
+            "--no-audit",
             "--config",
             str(cfg_path),
         ],
@@ -582,7 +677,11 @@ def test_cli_renders_json_summary_when_render_json(tmp_path: Path) -> None:
 
 
 def test_cli_writes_both_md_and_json(tmp_path: Path) -> None:
-    """``--render both --output base`` produces both ``base.md`` and ``base.json``."""
+    """``--render both --output base`` produces both ``base.md`` and ``base.json``.
+
+    ``--no-audit`` so the stub-placeholder audit gate does not
+    pre-empt the sibling-output assertions.
+    """
 
     cfg_path = _write_offline_config(tmp_path)
     _seed_index_with_fixtures(tmp_path)
@@ -602,6 +701,7 @@ def test_cli_writes_both_md_and_json(tmp_path: Path) -> None:
             "0.0",
             "--render",
             "both",
+            "--no-audit",
             "--output",
             str(out_base),
             "--config",
@@ -668,7 +768,14 @@ def test_cli_audit_subcommand_rejects_invalid_json(tmp_path: Path) -> None:
 
 
 def test_cli_section_runs_audit_by_default(tmp_path: Path) -> None:
-    """Audit runs after generation by default; passing run prints the summary."""
+    """Audit runs after generation by default.
+
+    Under the deterministic stub, the audit detects the canary
+    placeholder sentence (issue #45's AC2 gate) and the CLI exits 1.
+    The presence of the ``Audit:`` line proves the audit ran rather
+    than being silently skipped — which is the contract this test
+    exists to pin.
+    """
 
     cfg_path = _write_offline_config(tmp_path)
     _seed_index_with_fixtures(tmp_path)
@@ -689,9 +796,11 @@ def test_cli_section_runs_audit_by_default(tmp_path: Path) -> None:
             str(cfg_path),
         ],
     )
-    assert result.exit_code == 0, result.output
-    # The success summary is printed to stderr by ``_print_audit_findings``.
-    assert "Audit:" in result.output
+    assert result.exit_code == 1, result.output
+    # The audit's findings header is printed by ``_print_audit_findings``.
+    assert "Audit findings" in result.output
+    # The stub-placeholder gate is the specific finding we expect.
+    assert "placeholder_text" in result.output
 
 
 def test_cli_no_audit_flag_skips_audit(tmp_path: Path) -> None:

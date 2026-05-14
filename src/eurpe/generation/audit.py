@@ -34,6 +34,17 @@ What the audit checks
   :data:`~eurpe.generation.render.STATUS_BADGE` for at least one cited
   source. This is the signal that the renderer accidentally dropped a
   badge — the second line of defence behind the renderer's own tests.
+* ``no_evidence_escape`` — the draft body contains the deterministic
+  stub's verbatim "no retrieved evidence was available" escape
+  sentence AND the citation list is empty. A draft that explicitly
+  admits it has no evidence MUST NOT be allowed to ship as a passed
+  audit; that was the silent-quality-failure surfaced by the issue
+  #43 E2E harness on the GEIGER fixture (issue #45).
+* ``placeholder_text`` — the draft body contains the verbatim
+  ``This sentence references retrieved example [N] as supporting
+  evidence`` placeholder. That string is a deterministic-stub
+  artefact; if it lands in a real run, the stub leaked through the
+  factory's offline-fallback path and the draft is not trustworthy.
 
 **Warnings** (advisory — recorded but do not fail the audit):
 
@@ -80,6 +91,29 @@ from eurpe.schema import SourceStatus
 #: uses ``\\d+`` so we can fail explicitly on out-of-range markers.
 #: A previous reviewer flagged this gap on PR #41.
 _AUDIT_MARKER = re.compile(r"\[(\d+)\]")
+
+#: Verbatim sentence the deterministic stub emits when the retriever
+#: returned zero results — see :meth:`DeterministicLLMClient.generate`.
+#: Match is substring-based (the stub also adds a "Draft for the X
+#: section. " prefix that depends on the section type), so the audit
+#: pins the canary fragment that uniquely identifies the no-evidence
+#: state. A draft body that contains this sentence AND has no
+#: citations is the silent-quality-failure the issue #43 E2E harness
+#: surfaced (issue #45).
+_NO_EVIDENCE_ESCAPE_FRAGMENT = (
+    "No retrieved evidence was available; expand the index "
+    "with relevant past proposals before relying on this draft."
+)
+
+#: Regex matching the deterministic stub's verbatim placeholder
+#: ``This sentence references retrieved example [N] as supporting
+#: evidence`` for any positive integer N. The bounded ``\\d+`` mirrors
+#: :data:`_AUDIT_MARKER`. If this literal lands in a real run the stub
+#: leaked through the offline-fallback path and the draft is unsafe to
+#: ship regardless of how many citations it carries.
+_PLACEHOLDER_SENTENCE = re.compile(
+    r"This sentence references retrieved example \[\d+\] as supporting evidence"
+)
 
 
 class AuditSeverity(StrEnum):
@@ -167,6 +201,7 @@ class CitationAudit:
         findings.extend(self._check_citations(draft.citations))
         findings.extend(self._check_markers(draft.text, draft.citations))
         findings.extend(self._check_unused_citations(draft.text, draft.citations))
+        findings.extend(self._check_runtime_gates(draft))
         return self._build_result(findings)
 
     def audit_rendered(
@@ -191,6 +226,7 @@ class CitationAudit:
         findings.extend(self._check_citations(draft.citations))
         findings.extend(self._check_markers(draft.text, draft.citations))
         findings.extend(self._check_unused_citations(draft.text, draft.citations))
+        findings.extend(self._check_runtime_gates(draft))
         findings.extend(self._check_rendered(draft, rendered_markdown))
         return self._build_result(findings)
 
@@ -362,6 +398,67 @@ class CitationAudit:
         return findings
 
     @staticmethod
+    def _check_runtime_gates(draft: GenerationDraft) -> list[AuditFinding]:
+        """Two release-blocking gates that catch trust-violating drafts.
+
+        Both checks read only :attr:`GenerationDraft.text` and
+        :attr:`GenerationDraft.citations`, so they fire in both
+        :meth:`audit_draft` and :meth:`audit_rendered` — the audit
+        promise ("this draft is trustworthy") is the same whether the
+        caller asks the structured or the rendered form.
+
+        * :data:`_NO_EVIDENCE_ESCAPE_FRAGMENT` in ``draft.text`` AND
+          ``draft.citations`` empty → ERROR. The deterministic stub
+          emits the escape sentence verbatim when zero citations come
+          back from retrieval. A draft that admits "no evidence" with
+          an empty citation table is the silent quality failure the
+          issue #43 E2E harness surfaced on the GEIGER fixture
+          (issue #45). The dual condition keeps the gate narrow: a
+          real LLM that happens to *discuss* the absence of evidence
+          while still citing comparators won't trip it.
+        * :data:`_PLACEHOLDER_SENTENCE` matches ``draft.text`` → ERROR.
+          That literal is a deterministic-stub artefact; if it lands
+          in a real run, the stub leaked through the offline-fallback
+          path in :func:`~eurpe.generation.make_llm_client` and the
+          draft must not ship regardless of how many citations it
+          carries (the citations are real, but the prose around them
+          is not).
+        """
+
+        findings: list[AuditFinding] = []
+
+        if _NO_EVIDENCE_ESCAPE_FRAGMENT in draft.text and not draft.citations:
+            findings.append(
+                AuditFinding(
+                    severity=AuditSeverity.ERROR,
+                    code="no_evidence_escape",
+                    message=(
+                        "Draft body declares 'no retrieved evidence was available' "
+                        "and the citation list is empty. Such a draft cannot pass "
+                        "the audit — expand the index with relevant past proposals "
+                        "or widen the retrieval policy before re-running."
+                    ),
+                )
+            )
+
+        if _PLACEHOLDER_SENTENCE.search(draft.text):
+            findings.append(
+                AuditFinding(
+                    severity=AuditSeverity.ERROR,
+                    code="placeholder_text",
+                    message=(
+                        "Draft contains the deterministic-stub placeholder sentence "
+                        "'This sentence references retrieved example [N] as "
+                        "supporting evidence'. That literal must not appear in a "
+                        "real generation run; check the LLM factory's offline-"
+                        "fallback path."
+                    ),
+                )
+            )
+
+        return findings
+
+    @staticmethod
     def _check_rendered(
         draft: GenerationDraft,
         rendered_markdown: str,
@@ -403,12 +500,8 @@ class CitationAudit:
         # list adds one occurrence per citation.
         body_split = rendered_markdown.split("## References", 1)
         rendered_body = body_split[0]
-        text_counts = Counter(
-            int(m.group(1)) for m in _AUDIT_MARKER.finditer(draft.text)
-        )
-        body_counts = Counter(
-            int(m.group(1)) for m in _AUDIT_MARKER.finditer(rendered_body)
-        )
+        text_counts = Counter(int(m.group(1)) for m in _AUDIT_MARKER.finditer(draft.text))
+        body_counts = Counter(int(m.group(1)) for m in _AUDIT_MARKER.finditer(rendered_body))
         for n, expected in text_counts.items():
             if body_counts.get(n, 0) < expected:
                 findings.append(
