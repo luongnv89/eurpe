@@ -1,0 +1,67 @@
+# Confidential proposal content — NEVER commit
+proposals/
+raw_proposals/
+corpus/
+*.pdf
+*.docx
+*.pptx
+*.xlsx
+
+# Secrets & local env
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+credentials.json
+secrets/
+
+# Vector store & local indices
+chroma/
+chroma_db/
+vector_store/
+.chroma/
+*.faiss
+*.sqlite
+*.sqlite3
+*.db
+
+# Model weights & caches
+models/
+*.gguf
+*.safetensors
+*.bin
+.ollama/
+.cache/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+env/
+.virtualenv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Node (if UI tooling lands here)
+node_modules/
+dist/
+build/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+logs/
