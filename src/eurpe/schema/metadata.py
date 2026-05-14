@@ -87,7 +87,12 @@ class ProposalMetadata(BaseModel):
     YAML / JSON without custom encoders.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    # ``validate_assignment=True`` re-runs validators on every attribute set,
+    # so post-construction mutation of ``outcome`` (or any other field) cannot
+    # silently violate invariants. Combined with the matching flag on
+    # :class:`ChunkMetadata`, this catches the realistic drift path where a
+    # caller mutates the proposal object directly.
+    model_config = ConfigDict(extra="forbid", validate_assignment=True)
 
     programme: Programme = Field(description="EU funding programme.")
     call_id: str = Field(
@@ -114,6 +119,17 @@ class ProposalMetadata(BaseModel):
         stripped = value.strip()
         if not stripped:
             raise ValueError("call_id must be non-empty after stripping whitespace")
+        return stripped
+
+    @field_validator("source_path", mode="after")
+    @classmethod
+    def _source_path_non_empty(cls, value: str) -> str:
+        # ``min_length=1`` only checks the raw character count, so a string of
+        # whitespace would slip past it. Strip and re-check so a path that is
+        # only spaces / tabs is rejected the same way an empty string is.
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("source_path must be non-empty after stripping whitespace")
         return stripped
 
     @field_validator("year")
@@ -145,7 +161,19 @@ class ChunkMetadata(BaseModel):
     never disagree.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    # ``validate_assignment=True`` is what closes the post-construction
+    # drift hole: setting ``chunk.source_status = SourceStatus.REJECTED``
+    # after the fact re-runs ``_status_matches_proposal`` and raises.
+    # ``frozen=True`` is intentionally NOT used because legitimate ingestion
+    # paths still need to decorate a chunk after construction (for example,
+    # the chunker assigning ``chunk_index`` once it knows the position).
+    #
+    # Known Pydantic limitation: assignment validators do NOT propagate
+    # through nested models, so mutating ``chunk.proposal.outcome`` will
+    # re-fire ``ProposalMetadata`` validators (which is why the same flag is
+    # set there) but will NOT re-fire ``ChunkMetadata._status_matches_proposal``.
+    # The realistic drift path is via the outer model, which is covered.
+    model_config = ConfigDict(extra="forbid", validate_assignment=True)
 
     proposal: ProposalMetadata = Field(description="Source proposal this chunk belongs to.")
     section_type: SectionType = Field(default=SectionType.OTHER)

@@ -23,6 +23,16 @@ class SourceStatus(StrEnum):
     so a coordinator can always tell whether a quoted passage came from a
     funded proposal, a rejected one, an external reviewer note, or an
     unclassified source.
+
+    YAML serialization caveat: although :class:`enum.StrEnum` members ARE
+    Python ``str`` subclasses, ``yaml.safe_dump(SourceStatus.FUNDED)`` raises
+    ``RepresenterError`` because PyYAML's safe representer matches on exact
+    type, not on subclass. Callers that need to dump a model containing this
+    enum to YAML MUST first call ``model.model_dump(mode="json")`` (which
+    coerces enum members back to plain strings) and then pass the resulting
+    dict to ``yaml.safe_dump``. See ``tests/test_schema.py`` for the
+    canonical pattern. A repo-wide custom YAML representer is intentionally
+    not registered here; that belongs in the export module (Issue #17).
     """
 
     FUNDED = "funded"

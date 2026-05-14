@@ -234,3 +234,36 @@ def test_chunk_metadata_uses_default_section_type_other() -> None:
         source_status=SourceStatus.FUNDED,
     )
     assert chunk.section_type is SectionType.OTHER
+
+
+def test_proposal_metadata_rejects_whitespace_source_path() -> None:
+    """``source_path`` must reject whitespace-only strings.
+
+    ``min_length=1`` only checks raw character count, so a non-empty
+    whitespace string would slip past it without the dedicated validator.
+    Mirrors the ``call_id`` whitespace contract.
+    """
+
+    with pytest.raises(ValidationError) as excinfo:
+        ProposalMetadata(**_valid_proposal_kwargs(source_path="   "))
+    assert "source_path" in str(excinfo.value)
+
+
+def test_chunk_metadata_status_drift_blocked_after_construction() -> None:
+    """Mutating ``chunk.source_status`` post-construction must re-validate.
+
+    Without ``validate_assignment=True`` the model-validator only runs at
+    construction time, leaving a hole where a caller can flip the label
+    after the fact. The model_config flag closes that hole.
+    """
+
+    proposal = ProposalMetadata(**_valid_proposal_kwargs(outcome=SourceStatus.FUNDED))
+    chunk = ChunkMetadata(
+        proposal=proposal,
+        section_type=SectionType.METHODOLOGY,
+        chunk_index=0,
+        anchor=_valid_anchor(),
+        source_status=SourceStatus.FUNDED,
+    )
+    with pytest.raises(ValidationError, match="source_status"):
+        chunk.source_status = SourceStatus.REJECTED
