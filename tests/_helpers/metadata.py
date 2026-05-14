@@ -19,10 +19,15 @@ per-run output directory.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
 
 import yaml
+
+from tests._helpers.filename_parser import parse_proposal_filename
+
+logger = logging.getLogger(__name__)
 
 # Default values applied when no sibling YAML exists. Chosen to be the
 # safest possible: ``unspecified-call``-ish call_id, ``funded`` outcome
@@ -47,17 +52,35 @@ def synthesise_proposal_metadata(pdf_path: Path, **overrides: Any) -> dict[str, 
     ``index build`` CLI re-validates via ``ProposalMetadata.model_validate``
     so any error in the synthesised values surfaces with a clean message.
 
-    ``overrides`` win over the defaults; the PDF-derived fields
-    (``source_path``, ``proposal_title``) are applied last and so
-    override any same-named keys in ``overrides``. Callers that need
-    to pin those fields should use :func:`write_metadata_yaml`, which
-    re-applies its own ``overrides`` after this function returns.
+    Merge order (later wins): ``defaults → filename-parsed → overrides →
+    derived``. The PDF filename is consulted before defaults are
+    overridden by explicit ``overrides`` so a caller can always pin a
+    specific value (issue #47). The PDF-derived fields
+    (``source_path``, ``proposal_title``) are applied last because they
+    are intrinsic to the PDF path and so override any same-named keys
+    in ``overrides``. Callers that need to pin those fields should use
+    :func:`write_metadata_yaml`, which re-applies its own ``overrides``
+    after this function returns.
+
+    If the filename does not encode a programme alias (e.g., the GEIGER
+    PDF), a warning is logged so the operator knows to provide a sibling
+    YAML rather than silently inheriting the default programme.
     """
 
     body: dict[str, Any] = dict(_SYNTHESISED_DEFAULTS)
+    parsed = parse_proposal_filename(pdf_path.name)
+    body.update(parsed)
     body.update(overrides)
     body["proposal_title"] = pdf_path.stem
     body["source_path"] = str(pdf_path)
+
+    if "programme" not in parsed:
+        logger.warning(
+            "Could not infer programme from filename %r; using default %r",
+            pdf_path.name,
+            body["programme"],
+        )
+
     return body
 
 
