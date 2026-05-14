@@ -1,0 +1,21 @@
+# EURPE local configuration — copy to config.yaml and edit as needed.
+# `eurpe smoke` will create config.yaml from this file if it does not exist.
+
+# Where ingested proposal documents live on disk.
+corpus_path: ./data/corpus
+
+# Where the local vector index is persisted.
+index_path: ./data/index
+
+# Local model runtime configuration (no network calls in offline mode).
+models:
+  runtime: ollama        # ollama | mlx | vllm
+  llm_model: llama3.1:8b
+  embedding_model: nomic-embed-text
+  ollama_base_url: http://localhost:11434
+
+# Block all outbound network access by default.
+offline_mode: true
+
+# Logging verbosity: DEBUG | INFO | WARNING | ERROR
+log_level: INFO

@@ -7,6 +7,10 @@ corpus/
 *.pptx
 *.xlsx
 
+# Local runtime config & data (created by `eurpe smoke` from config.example.yaml)
+config.yaml
+data/
+
 # Secrets & local env
 .env
 .env.*

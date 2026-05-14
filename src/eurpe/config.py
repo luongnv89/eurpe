@@ -1,0 +1,121 @@
+"""Local configuration loader for EURPE.
+
+Reads ``config.yaml`` from the project root by default. If the file is missing,
+``ensure_config_file`` will copy ``config.example.yaml`` into place. The
+configuration is validated with Pydantic models so the rest of the application
+can rely on a typed, well-shaped object.
+
+All runtime defaults assume **offline operation**: no network access is required
+to load or validate configuration.
+"""
+
+from __future__ import annotations
+
+import shutil
+from pathlib import Path
+
+import yaml
+from pydantic import BaseModel, Field, field_validator
+
+# Repository root resolves to .../eu-research-projects (two parents up from this file:
+# src/eurpe/config.py -> src/eurpe -> src -> repo root).
+REPO_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_CONFIG_PATH = REPO_ROOT / "config.yaml"
+EXAMPLE_CONFIG_PATH = REPO_ROOT / "config.example.yaml"
+
+
+class ModelsConfig(BaseModel):
+    """Local model runtime settings.
+
+    No URL is dialed at config-load time; ``ollama_base_url`` is recorded for
+    the ingestion/retrieval/generation modules to use later when explicitly
+    invoked by the user.
+    """
+
+    runtime: str = Field(default="ollama", description="ollama | mlx | vllm")
+    llm_model: str = Field(default="llama3.1:8b")
+    embedding_model: str = Field(default="nomic-embed-text")
+    ollama_base_url: str = Field(default="http://localhost:11434")
+
+    @field_validator("runtime")
+    @classmethod
+    def _runtime_must_be_known(cls, value: str) -> str:
+        allowed = {"ollama", "mlx", "vllm"}
+        if value not in allowed:
+            raise ValueError(f"runtime must be one of {sorted(allowed)}, got {value!r}")
+        return value
+
+
+class EurpeConfig(BaseModel):
+    """Top-level EURPE configuration."""
+
+    corpus_path: Path = Field(default=Path("./data/corpus"))
+    index_path: Path = Field(default=Path("./data/index"))
+    models: ModelsConfig = Field(default_factory=ModelsConfig)
+    offline_mode: bool = Field(default=True)
+    log_level: str = Field(default="INFO")
+
+    @field_validator("log_level")
+    @classmethod
+    def _log_level_known(cls, value: str) -> str:
+        allowed = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
+        upper = value.upper()
+        if upper not in allowed:
+            raise ValueError(f"log_level must be one of {sorted(allowed)}, got {value!r}")
+        return upper
+
+    def resolve_paths(self, base: Path | None = None) -> "EurpeConfig":
+        """Return a copy with relative paths resolved against ``base``.
+
+        Defaults to the repository root so that running ``eurpe smoke`` from any
+        working directory produces consistent paths.
+        """
+        anchor = (base or REPO_ROOT).resolve()
+        corpus = self.corpus_path
+        index = self.index_path
+        if not corpus.is_absolute():
+            corpus = (anchor / corpus).resolve()
+        if not index.is_absolute():
+            index = (anchor / index).resolve()
+        return self.model_copy(update={"corpus_path": corpus, "index_path": index})
+
+
+def ensure_config_file(
+    config_path: Path = DEFAULT_CONFIG_PATH,
+    example_path: Path = EXAMPLE_CONFIG_PATH,
+) -> Path:
+    """Make sure a ``config.yaml`` exists, copying from the example if needed.
+
+    Returns the path that was used. No network access is performed.
+    """
+    if config_path.exists():
+        return config_path
+    if not example_path.exists():
+        raise FileNotFoundError(
+            f"Neither {config_path} nor {example_path} exists; cannot bootstrap config."
+        )
+    shutil.copyfile(example_path, config_path)
+    return config_path
+
+
+def load_config(config_path: Path | None = None) -> EurpeConfig:
+    """Load and validate the EURPE configuration from ``config_path``.
+
+    If ``config_path`` is ``None``, the repository-root ``config.yaml`` is used.
+    The file must already exist — call :func:`ensure_config_file` first if you
+    want bootstrap behaviour.
+    """
+    path = config_path or DEFAULT_CONFIG_PATH
+    if not path.exists():
+        raise FileNotFoundError(f"Configuration file not found: {path}")
+    with path.open("r", encoding="utf-8") as fh:
+        raw = yaml.safe_load(fh) or {}
+    if not isinstance(raw, dict):
+        raise ValueError(f"Configuration root must be a mapping; got {type(raw).__name__}")
+    return EurpeConfig.model_validate(raw)
+
+
+def ensure_runtime_dirs(config: EurpeConfig) -> None:
+    """Create the corpus and index directories on disk if they do not exist."""
+    config.corpus_path.mkdir(parents=True, exist_ok=True)
+    config.index_path.mkdir(parents=True, exist_ok=True)
