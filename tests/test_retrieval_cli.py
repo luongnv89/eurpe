@@ -18,41 +18,13 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-import yaml
 from typer.testing import CliRunner
 
 from eurpe.cli import app
 from eurpe.retrieval import ChromaIndex, DeterministicHashEmbedder
 from tests._chunk_helpers import build_fixture_chunks, query_text_for
-
-
-def _write_offline_config(tmp_path: Path) -> Path:
-    """Write a ``config.yaml`` that pins ``index_path`` under ``tmp_path``.
-
-    Critical: we re-use the *real* config schema rather than mocking
-    ``load_config`` so the same code paths the user hits at runtime
-    are exercised.
-    """
-
-    cfg_path = tmp_path / "config.yaml"
-    cfg_path.write_text(
-        yaml.safe_dump(
-            {
-                "corpus_path": str(tmp_path / "corpus"),
-                "index_path": str(tmp_path / "index"),
-                "models": {
-                    "runtime": "ollama",
-                    "llm_model": "llama3.1:8b",
-                    "embedding_model": "nomic-embed-text",
-                    "ollama_base_url": "http://localhost:1",  # unreachable on purpose
-                },
-                "offline_mode": True,
-                "log_level": "INFO",
-            }
-        ),
-        encoding="utf-8",
-    )
-    return cfg_path
+from tests._helpers.metadata import write_metadata_yaml
+from tests._helpers.offline import write_offline_config as _write_offline_config
 
 
 def _seed_index_with_fixtures(tmp_path: Path, *, collection: str = "default") -> int:
@@ -303,23 +275,22 @@ def _build_synthetic_pdf(path: Path) -> None:
 
 
 def _write_metadata_yaml(yaml_path: Path, pdf_path: Path) -> None:
-    """Minimal proposal-metadata YAML pointing at ``pdf_path``."""
+    """Minimal proposal-metadata YAML pointing at ``pdf_path``.
 
-    yaml_path.write_text(
-        yaml.safe_dump(
-            {
-                "programme": "horizon_europe",
-                "call_id": "HORIZON-CL5-2024-D3-02",
-                "topic_id": "HORIZON-CL5-2024-D3-02-01",
-                "year": 2024,
-                "outcome": "funded",
-                "proposal_title": "Synthetic Test Proposal",
-                "consortium_acronym": "STP",
-                "source_path": str(pdf_path),
-                "language": "en",
-            }
-        ),
-        encoding="utf-8",
+    Thin wrapper over :func:`tests._helpers.metadata.write_metadata_yaml`
+    that pins the historical fixture values (call_id / topic_id /
+    consortium acronym) so the existing assertions stay readable in
+    context. The shared helper handles the file-write mechanics so
+    this module no longer needs the ``yaml`` import for that purpose.
+    """
+
+    write_metadata_yaml(
+        yaml_path,
+        pdf_path,
+        call_id="HORIZON-CL5-2024-D3-02",
+        topic_id="HORIZON-CL5-2024-D3-02-01",
+        proposal_title="Synthetic Test Proposal",
+        consortium_acronym="STP",
     )
 
 

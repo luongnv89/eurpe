@@ -15,42 +15,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import yaml
 from typer.testing import CliRunner
 
 from eurpe.cli import app
 from eurpe.retrieval import ChromaIndex, DeterministicHashEmbedder
 from tests._chunk_helpers import build_fixture_chunks
-
-
-def _write_offline_config(tmp_path: Path) -> Path:
-    """Write a config.yaml that pins paths under tmp_path and disables Ollama.
-
-    Same pattern as ``test_retrieval_cli._write_offline_config`` —
-    pointing at an unreachable Ollama port forces the factory to fall
-    back to the deterministic stub, which is exactly what we want for
-    fast tests.
-    """
-
-    cfg_path = tmp_path / "config.yaml"
-    cfg_path.write_text(
-        yaml.safe_dump(
-            {
-                "corpus_path": str(tmp_path / "corpus"),
-                "index_path": str(tmp_path / "index"),
-                "models": {
-                    "runtime": "ollama",
-                    "llm_model": "llama3.1:8b",
-                    "embedding_model": "nomic-embed-text",
-                    "ollama_base_url": "http://localhost:1",  # unreachable
-                },
-                "offline_mode": True,
-                "log_level": "INFO",
-            }
-        ),
-        encoding="utf-8",
-    )
-    return cfg_path
+from tests._helpers.offline import write_offline_config as _write_offline_config
 
 
 def _seed_index_with_fixtures(tmp_path: Path) -> int:
