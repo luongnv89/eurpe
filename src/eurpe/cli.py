@@ -19,6 +19,7 @@ from eurpe.config import (
     ensure_runtime_dirs,
     load_config,
 )
+from eurpe.ingestion.cli import ingest as ingest_command
 
 app = typer.Typer(
     name="eurpe",
@@ -26,6 +27,13 @@ app = typer.Typer(
     no_args_is_help=True,
     add_completion=False,
 )
+
+# Register ``ingest`` as a flat command (not a sub-app). The ingestion
+# module owns the implementation and the option/argument signature; here
+# we just attach it to the top-level Typer so ``eurpe ingest <pdf>`` works.
+# When ingestion grows multiple sub-actions (Issue #4 onwards), we can
+# promote this to a sub-Typer without touching the implementation.
+app.command("ingest")(ingest_command)
 
 
 @app.command()
