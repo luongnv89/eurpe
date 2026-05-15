@@ -32,7 +32,7 @@ export interface ConfirmRequest {
   parse_token: string;
   programme: string;
   call_id: string;
-  topic_id?: string | null;
+  topic_id: string;
   year: number;
   outcome: string;
   proposal_title?: string | null;

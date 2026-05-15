@@ -268,6 +268,28 @@ def test_confirm_rejects_unknown_programme_value(configured_app: TestClient) -> 
     assert response.status_code == 422, response.text
 
 
+def test_confirm_rejects_missing_required_topic(configured_app: TestClient) -> None:
+    """Pydantic rejects a missing topic_id with 422."""
+
+    file_bytes = _make_pdf_bytes()
+    files = {"file": ("HORIZON-CL3-2024-CS-01.pdf", file_bytes, "application/pdf")}
+    parse_response = configured_app.post("/api/ingestion/parse", files=files)
+    parse_token = parse_response.json()["parse_token"]
+
+    response = configured_app.post(
+        "/api/ingestion/confirm",
+        json={
+            "parse_token": parse_token,
+            "programme": Programme.HORIZON_EUROPE.value,
+            "call_id": "HORIZON-CL3-2024-CS-01",
+            # topic_id intentionally missing
+            "year": 2024,
+            "outcome": SourceStatus.FUNDED.value,
+        },
+    )
+    assert response.status_code == 422, response.text
+
+
 def test_confirm_rejects_unknown_parse_token(configured_app: TestClient) -> None:
     """An unknown or expired parse_token returns 404."""
 
@@ -277,6 +299,7 @@ def test_confirm_rejects_unknown_parse_token(configured_app: TestClient) -> None
             "parse_token": "no-such-token",
             "programme": Programme.HORIZON_EUROPE.value,
             "call_id": "HORIZON-CL3-2024-CS-01",
+            "topic_id": "HORIZON-CL3-2024-CS-01-01",
             "year": 2024,
             "outcome": SourceStatus.FUNDED.value,
         },

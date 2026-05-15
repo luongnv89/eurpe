@@ -95,7 +95,7 @@ export function ConfirmationForm({
       parse_token: parseResult.parse_token,
       programme,
       call_id: callId.trim(),
-      topic_id: topicId.trim() || null,
+      topic_id: topicId.trim(),
       year: yearNum,
       outcome,
       proposal_title: proposalTitle.trim() || null,

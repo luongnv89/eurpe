@@ -90,7 +90,7 @@ class ConfirmRequest(BaseModel):
         min_length=1,
         description="Confirmed call identifier, e.g. HORIZON-CL5-2024-D3-02.",
     )
-    topic_id: str | None = Field(default=None, description="Optional topic id within the call.")
+    topic_id: str = Field(min_length=1, description="Confirmed topic id within the call.")
     year: int = Field(ge=2014, le=2099, description="Call year (2014-2099).")
     outcome: SourceStatus = Field(
         description=(
