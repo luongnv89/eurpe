@@ -22,9 +22,7 @@ from tests._helpers.metadata import (
     synthesise_proposal_metadata,
 )
 
-SANCUS_NAME = (
-    "SANCUS_PROPOSAL_952672-SANCUS-H2020-SU-ICT-2019-PART_B_Section_1.pdf"
-)
+SANCUS_NAME = "SANCUS_PROPOSAL_952672-SANCUS-H2020-SU-ICT-2019-PART_B_Section_1.pdf"
 GEIGER_NAME = "GEIGER_883588--SEALED-PROPOSAL.pdf"
 
 
@@ -52,12 +50,8 @@ def test_geiger_filename_logs_warning(tmp_path, caplog):
     assert body["call_id"] == "UNSPECIFIED-CALL"
     assert body["topic_id"] == "883588"
     # Warning was emitted to flag the gap to the operator.
-    warnings = [
-        record for record in caplog.records if record.levelno == logging.WARNING
-    ]
-    assert any(
-        "Could not infer programme" in record.getMessage() for record in warnings
-    )
+    warnings = [record for record in caplog.records if record.levelno == logging.WARNING]
+    assert any("Could not infer programme" in record.getMessage() for record in warnings)
 
 
 def test_explicit_overrides_win_over_filename(tmp_path):
