@@ -114,6 +114,34 @@ def test_evaluate_duplicate_block_hard_on_hash_collision(index: ChromaIndex) -> 
     assert decision.conflicting_document_id == "existing_doc"
 
 
+def test_evaluate_duplicate_block_hard_when_hash_and_document_id_both_match(
+    index: ChromaIndex,
+) -> None:
+    """Hash check wins over doc_id check — same bytes re-uploaded under same name is BLOCK_HARD.
+
+    Pins the order-of-checks contract in :func:`evaluate_duplicate`: the
+    hash branch fires first, so a byte-identical re-upload (even with the
+    same archive-stem document_id) is rejected as a hard duplicate rather
+    than silently re-indexed. A future refactor that flips the order to
+    "doc_id first" would otherwise convert this case to REINDEX without
+    any other test failing.
+    """
+
+    existing_hash = "a" * 64
+    proposal = _proposal(content_hash=existing_hash, proposal_title="Same Doc")
+    index.upsert([_chunk(proposal, document_id="shared_doc_id")])
+
+    decision = evaluate_duplicate(
+        index=index,
+        content_hash=existing_hash,  # same bytes
+        proposal_title="Same Doc",
+        call_id="HORIZON-CL5-2024-D3-02",
+        new_document_id="shared_doc_id",  # same doc_id too
+    )
+    assert decision.action is DuplicateAction.BLOCK_HARD
+    assert decision.conflicting_document_id == "shared_doc_id"
+
+
 def test_evaluate_duplicate_reindex_on_document_id_collision(
     index: ChromaIndex,
 ) -> None:
