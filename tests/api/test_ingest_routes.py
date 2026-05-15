@@ -185,7 +185,9 @@ def test_confirm_endpoint_persists_sidecar_and_indexes_chunks(
     files = {"file": ("HORIZON-CL5-2024-D3-02-883588.pdf", file_bytes, "application/pdf")}
     parse_response = configured_app.post("/api/ingestion/parse", files=files)
     assert parse_response.status_code == 200, parse_response.text
-    parse_token = parse_response.json()["parse_token"]
+    parse_body = parse_response.json()
+    parse_token = parse_body["parse_token"]
+    staged_source_path = Path(parse_body["source_path"])
 
     confirm_body = {
         "parse_token": parse_token,
@@ -215,7 +217,11 @@ def test_confirm_endpoint_persists_sidecar_and_indexes_chunks(
     assert sidecar["call_id"] == "HORIZON-CL5-2024-D3-02"
     assert sidecar["outcome"] == SourceStatus.FUNDED.value
     assert sidecar["year"] == 2024
-    assert sidecar["source_path"].endswith(".pdf")
+    archived_source_path = Path(sidecar["source_path"])
+    assert archived_source_path.exists()
+    assert archived_source_path.suffix == ".pdf"
+    assert archived_source_path.parent == sidecar_path.parent
+    assert not staged_source_path.exists()
 
 
 def test_confirm_rejects_missing_required_programme(

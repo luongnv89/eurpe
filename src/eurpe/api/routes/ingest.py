@@ -183,8 +183,41 @@ def _build_draft(original_filename: str, parsed_title: str | None) -> dict:
     return draft
 
 
+def _archive_pdf(
+    staged_pdf_path: Path,
+    *,
+    token: str,
+    proposal: ProposalMetadata,
+    runtime_dir: Path,
+) -> Path:
+    """Copy the staged PDF to the durable proposal archive and return it.
+
+    ``ParseTokenStore.delete`` removes the staged upload after a successful
+    confirm, so indexed chunk metadata and the YAML sidecar must not point
+    at the staging path. The archive filename is derived from confirmed
+    metadata plus the operator's original safe filename (the token prefix is
+    stripped) so re-ingesting the same proposal overwrites the same source
+    file and preserves Chroma upsert idempotency.
+    """
+
+    proposal_dir = runtime_dir / "proposals"
+    proposal_dir.mkdir(parents=True, exist_ok=True)
+    original_name = staged_pdf_path.name
+    token_prefix = f"{token}__"
+    if original_name.startswith(token_prefix):
+        original_name = original_name[len(token_prefix) :]
+    topic = proposal.topic_id or "whole-call"
+    archive_name = f"{proposal.programme.value}-{proposal.call_id}-{topic}-{original_name}"
+    archive_name = archive_name.replace("/", "_").replace("\\", "_")
+    archive_path = proposal_dir / archive_name
+    tmp = archive_path.with_suffix(archive_path.suffix + ".tmp")
+    shutil.copyfile(staged_pdf_path, tmp)
+    os.replace(tmp, archive_path)
+    return archive_path
+
+
 def _persist_sidecar(
-    pdf_path: Path,
+    archived_pdf_path: Path,
     proposal: ProposalMetadata,
     *,
     runtime_dir: Path,
@@ -194,7 +227,7 @@ def _persist_sidecar(
     The sidecar lives under ``<runtime_dir>/proposals/`` (NOT next to the
     staged PDF in ``<runtime_dir>/staging/``) so the confirm route can
     safely delete the staged file once chunks are indexed without losing
-    the persisted metadata. Sidecar filename is the staged PDF's basename
+    the persisted metadata. Sidecar filename is the archived PDF's basename
     with ``.metadata.yaml`` appended.
 
     The serialisation goes through ``model_dump(mode="json")`` first to
@@ -208,7 +241,7 @@ def _persist_sidecar(
 
     sidecar_dir = runtime_dir / "proposals"
     sidecar_dir.mkdir(parents=True, exist_ok=True)
-    sidecar_path = sidecar_dir / f"{pdf_path.stem}.metadata.yaml"
+    sidecar_path = sidecar_dir / f"{archived_pdf_path.stem}.metadata.yaml"
     body = proposal.model_dump(mode="json")
     tmp = sidecar_path.with_suffix(sidecar_path.suffix + ".tmp")
     tmp.write_text(yaml.safe_dump(body, sort_keys=False), encoding="utf-8")
@@ -358,7 +391,15 @@ def confirm(
             detail=f"failed to re-parse staged PDF: {exc}",
         ) from exc
 
-    sidecar_path = _persist_sidecar(record.pdf_path, proposal, runtime_dir=cfg.runtime_dir)
+    archived_pdf_path = _archive_pdf(
+        record.pdf_path,
+        token=body.parse_token,
+        proposal=proposal,
+        runtime_dir=cfg.runtime_dir,
+    )
+    proposal = proposal.model_copy(update={"source_path": str(archived_pdf_path)})
+    parsed = parsed.model_copy(update={"source_path": str(archived_pdf_path)})
+    sidecar_path = _persist_sidecar(archived_pdf_path, proposal, runtime_dir=cfg.runtime_dir)
 
     try:
         chunks_added = index_proposal(
