@@ -78,3 +78,32 @@ def index_proposal(
     chunks = chunker.chunk(parsed, proposal)
     index.upsert(chunks)
     return len(chunks)
+
+
+def reindex_proposal(
+    parsed: ParsedProposal,
+    proposal: ProposalMetadata,
+    *,
+    chunker: HierarchicalChunker,
+    index: ChromaIndex,
+    replaced_document_id: str,
+) -> int:
+    """Delete the chunks for ``replaced_document_id`` then upsert the new ones.
+
+    Used by both ingestion callers (HTTP confirm route and CLI) for the
+    REINDEX and forced-soft-duplicate cases of duplicate detection. The
+    delete happens *first* so a corrected version with fewer chunks does
+    not leave orphans behind: Chroma's ``upsert`` is keyed on
+    :attr:`Chunk.chunk_id`, which embeds the per-chunk text hash, so a
+    plain re-upsert would replace matching chunks but stale higher-index
+    rows from the previous version would survive.
+
+    The function returns the count of newly added chunks (matching the
+    return shape of :func:`index_proposal`) so callers can keep their
+    "chunks added" reporting consistent.
+    """
+
+    index.delete_by_document_id(replaced_document_id)
+    chunks = chunker.chunk(parsed, proposal)
+    index.upsert(chunks)
+    return len(chunks)

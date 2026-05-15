@@ -23,6 +23,11 @@ weights, so an offline test run pays only the chromadb import cost.
 from __future__ import annotations
 
 from eurpe.retrieval.chunker import HierarchicalChunker, infer_section_type
+from eurpe.retrieval.dedup import (
+    DuplicateAction,
+    DuplicateDecision,
+    evaluate_duplicate,
+)
 from eurpe.retrieval.embeddings import (
     DeterministicHashEmbedder,
     Embedder,
@@ -36,7 +41,7 @@ from eurpe.retrieval.errors import (
 )
 from eurpe.retrieval.index import ChromaIndex
 from eurpe.retrieval.models import Chunk
-from eurpe.retrieval.pipeline import index_proposal
+from eurpe.retrieval.pipeline import index_proposal, reindex_proposal
 from eurpe.retrieval.retriever import (
     RetrievalPolicy,
     RetrievalResult,
@@ -47,6 +52,8 @@ __all__ = [
     "Chunk",
     "ChromaIndex",
     "DeterministicHashEmbedder",
+    "DuplicateAction",
+    "DuplicateDecision",
     "Embedder",
     "EmbeddingError",
     "HierarchicalChunker",
@@ -56,7 +63,9 @@ __all__ = [
     "RetrievalPolicy",
     "RetrievalResult",
     "SourceStatusAwareRetriever",
+    "evaluate_duplicate",
     "index_proposal",
     "infer_section_type",
     "make_embedder",
+    "reindex_proposal",
 ]
