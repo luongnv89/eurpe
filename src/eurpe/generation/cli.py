@@ -52,7 +52,7 @@ from eurpe.generation.llm import make_llm_client
 from eurpe.generation.models import GenerationDraft, GenerationRequest
 from eurpe.generation.render import MarkdownCitationRenderer
 from eurpe.generation.workflow import SectionGenerationWorkflow
-from eurpe.ingestion.errors import ParserError
+from eurpe.ingestion.errors import IngestionError
 from eurpe.intake import (
     TopicContext,
     extract_topic_context_from_pdf,
@@ -76,14 +76,18 @@ generate_app = typer.Typer(
 )
 
 
-def _load_context(value: str) -> str:
-    """Resolve ``--context`` value: literal text or ``@path/to/file`` reference.
+def _load_context(value: str, *, flag: str = "--context") -> str:
+    """Resolve a flag value: literal text or ``@path/to/file`` reference.
 
     The ``@``-prefixed file form mirrors a common CLI convention
     (curl, gh) and avoids the awkwardness of pasting multi-paragraph
     call text on a command line. A literal ``@`` at start can be
     escaped by doubling (``@@`` → ``@``) for the rare user who
     wants verbatim ``@``-prefixed text.
+
+    ``flag`` names the user-facing option in the error message so the
+    helper can be reused by ``--topic-text`` without producing a
+    misleading "--context" reference.
     """
 
     if not value:
@@ -93,7 +97,7 @@ def _load_context(value: str) -> str:
     if value.startswith("@"):
         path = Path(value[1:])
         if not path.exists():
-            raise typer.BadParameter(f"--context points to a file that does not exist: {path}")
+            raise typer.BadParameter(f"{flag} points to a file that does not exist: {path}")
         return path.read_text(encoding="utf-8")
     return value
 
@@ -407,12 +411,12 @@ def section(
 
     topic_context: TopicContext | None = None
     if topic_text:
-        resolved_topic_text = _load_context(topic_text)
+        resolved_topic_text = _load_context(topic_text, flag="--topic-text")
         topic_context = extract_topic_context_from_text(resolved_topic_text)
     elif topic_pdf is not None:
         try:
-            topic_context = extract_topic_context_from_pdf(topic_pdf)
-        except ParserError as exc:
+            topic_context = extract_topic_context_from_pdf(topic_pdf, config=cfg)
+        except IngestionError as exc:
             typer.echo(
                 f"error: failed to parse --topic-pdf {topic_pdf}: {exc}",
                 err=True,

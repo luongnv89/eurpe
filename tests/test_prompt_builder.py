@@ -20,6 +20,7 @@ below pin:
 from __future__ import annotations
 
 import re
+from typing import TYPE_CHECKING
 
 from eurpe.generation.models import GenerationRequest
 from eurpe.generation.prompt import (
@@ -27,6 +28,9 @@ from eurpe.generation.prompt import (
     SectionPromptBuilder,
 )
 from eurpe.retrieval import Chunk, RetrievalResult
+
+if TYPE_CHECKING:
+    from eurpe.intake import TopicContext
 from eurpe.retrieval.retriever import POLICY_REASON_FUNDED, POLICY_REASON_REJECTED
 from eurpe.schema import (
     ChunkMetadata,
@@ -312,7 +316,7 @@ def test_evidence_block_uses_pinned_marker_format() -> None:
 def _topic_context(
     *,
     section_guidance_for: SectionType | None = None,
-) -> "TopicContext":
+) -> TopicContext:
     """Build a fully-populated :class:`TopicContext` for prompt assertions.
 
     ``section_guidance_for`` lets a test request a guidance entry on a

@@ -387,9 +387,8 @@ class SectionPromptBuilder:
 
         lines: list[str] = []
         if topic_context.programme is not None:
-            lines.append(
-                f"**Programme:** {SectionPromptBuilder._humanize_programme(topic_context.programme)}"
-            )
+            programme_label = SectionPromptBuilder._humanize_programme(topic_context.programme)
+            lines.append(f"**Programme:** {programme_label}")
         if topic_context.call_id:
             lines.append(f"**Call ID:** {topic_context.call_id}")
         if topic_context.topic_id:

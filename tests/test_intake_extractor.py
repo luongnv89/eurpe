@@ -19,7 +19,6 @@ from typing import Any
 import pytest
 
 from eurpe.intake import (
-    TopicContext,
     TopicSource,
     extract_topic_context_from_pdf,
     extract_topic_context_from_text,

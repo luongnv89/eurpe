@@ -5,9 +5,10 @@ Two entry points:
 * :func:`extract_topic_context_from_text` turns a pasted plaintext
   excerpt into a :class:`TopicContext` using cheap regex parsing — no
   network, no LLM, no third-party dep.
-* :func:`extract_topic_context_from_pdf` runs Docling in offline mode
-  against a topic-page PDF excerpt, concatenates headings + body into
-  one flat text, and delegates to the text path.
+* :func:`extract_topic_context_from_pdf` runs Docling against a
+  topic-page PDF excerpt — offline by default, or honouring
+  ``config.offline_mode`` when a config is supplied — concatenates
+  headings + body into one flat text, and delegates to the text path.
 
 Why regex rather than a structured parser?
 
@@ -30,13 +31,10 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from eurpe.intake.models import TopicContext, TopicSource
 from eurpe.schema import Programme, SectionType
-
-if TYPE_CHECKING:
-    from eurpe.ingestion.docling_parser import DoclingProposalParser
 
 # Programme aliases observed in call IDs / topic text map to canonical
 # ``Programme`` enum values. Lookup is case-insensitive. Copied (not
@@ -91,25 +89,6 @@ _CALL_ID_STOP_TOKENS: frozenset[str] = frozenset(
     }
 )
 
-# Heading names that terminate a heading-anchored block. The Expected
-# Outcomes / Scope captures stop when any of these is seen as a
-# heading-line prefix. ``re.IGNORECASE`` is applied at match time.
-_BLOCK_TERMINATORS: tuple[str, ...] = (
-    "Scope",
-    "Objective",
-    "Objectives",
-    "Specific Conditions",
-    "Type of action",
-    "Eligibility",
-    "Destination",
-    "Cluster",
-    "Expected Outcomes",
-    "Methodology guidance",
-    "Impact guidance",
-    "Excellence guidance",
-    "Implementation guidance",
-)
-
 # Map a heading prefix → SectionType for ``section_guidance`` extraction.
 # Only fires on verbatim matches (no fuzzy / synonym guesses) so an
 # operator can predict what gets surfaced.
@@ -125,6 +104,26 @@ _SECTION_GUIDANCE_HEADINGS: dict[str, SectionType] = {
     "ethics guidance": SectionType.ETHICS,
     "dissemination guidance": SectionType.DISSEMINATION,
 }
+
+# Heading names that terminate a heading-anchored block. The Expected
+# Outcomes / Scope captures stop when any of these is seen as a
+# heading-line prefix. ``re.IGNORECASE`` is applied at match time.
+# Derived by unioning a static set of structural headings with every
+# guidance heading — adding a new entry to ``_SECTION_GUIDANCE_HEADINGS``
+# automatically extends the terminator set so adjacent guidance blocks
+# can't swallow each other.
+_BLOCK_TERMINATORS: tuple[str, ...] = (
+    "Scope",
+    "Objective",
+    "Objectives",
+    "Specific Conditions",
+    "Type of action",
+    "Eligibility",
+    "Destination",
+    "Cluster",
+    "Expected Outcomes",
+    *sorted({heading.title() for heading in _SECTION_GUIDANCE_HEADINGS}),
+)
 
 
 def _normalise(text: str) -> str:
@@ -408,18 +407,25 @@ def extract_topic_context_from_pdf(
     pdf_path: Path,
     *,
     parser: Any = None,
+    config: Any = None,
 ) -> TopicContext:
     """Parse a topic-page PDF excerpt into :class:`TopicContext`.
 
     Uses :class:`~eurpe.ingestion.docling_parser.DoclingProposalParser`
-    in offline mode by default. The parsed sections are concatenated
-    into a flat text blob (``"<heading>\\n<text>"`` per section, joined
-    by blank lines, with the title prepended if present) and handed to
+    and honours ``config.offline_mode`` when a config is supplied
+    (defaults to ``True`` otherwise, preserving the previous safe
+    default). The parsed sections are concatenated into a flat text
+    blob (``"<heading>\\n<text>"`` per section, joined by blank lines,
+    with the title prepended if present) and handed to
     :func:`extract_topic_context_from_text` for the actual field
     extraction.
 
     ``parser`` accepts any object exposing a ``parse(Path) -> ParsedProposal``
     method so tests can stub the Docling round-trip with a fake.
+
+    ``config`` accepts any object with an ``offline_mode: bool``
+    attribute (e.g. :class:`~eurpe.config.EurpeConfig`). When ``None``,
+    the parser runs in offline mode.
 
     The lazy import means a fast test (one that exercises the
     text-only extractor) does not pull Docling into the import graph.
@@ -428,7 +434,8 @@ def extract_topic_context_from_pdf(
     if parser is None:
         from eurpe.ingestion.docling_parser import DoclingProposalParser
 
-        parser = DoclingProposalParser(offline=True)
+        offline = True if config is None else bool(getattr(config, "offline_mode", True))
+        parser = DoclingProposalParser(offline=offline)
 
     parsed = parser.parse(pdf_path)
 
