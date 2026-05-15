@@ -105,6 +105,14 @@ class ConfirmRequest(BaseModel):
         description="Optional consortium acronym, e.g. STP.",
     )
     language: str = Field(default="en", description="ISO 639-1 language code.")
+    force: bool = Field(
+        default=False,
+        description=(
+            "Override the soft-duplicate warning emitted when an existing "
+            "record matches by (proposal_title, call_id) but the bytes differ. "
+            "Has no effect on byte-identical (hard) duplicates."
+        ),
+    )
 
 
 class ConfirmResponse(BaseModel):
@@ -117,6 +125,23 @@ class ConfirmResponse(BaseModel):
     sidecar_path: str = Field(
         min_length=1,
         description="Absolute path to the persisted YAML metadata sidecar.",
+    )
+    duplicate_warning: str | None = Field(
+        default=None,
+        description=(
+            "Soft-duplicate warning surfaced when an existing record matches "
+            "by (proposal_title, call_id) but the new content differs and the "
+            "operator overrode the block via ``force=true``. ``None`` on the "
+            "happy path."
+        ),
+    )
+    replaced_document_id: str | None = Field(
+        default=None,
+        description=(
+            "When non-null, the document_id whose chunks were deleted before "
+            "this upsert. Set for the REINDEX (corrected-version) and forced "
+            "soft-duplicate cases; ``None`` on a clean first-ingest."
+        ),
     )
 
 

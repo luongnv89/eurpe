@@ -68,12 +68,16 @@ from eurpe.api.storage import ParseTokenStore
 from eurpe.config import EurpeConfig
 from eurpe.ingestion.docling_parser import DoclingProposalParser
 from eurpe.ingestion.errors import IngestionError
+from eurpe.ingestion.hashing import compute_content_hash
 from eurpe.intake.extractor import extract_topic_context_from_text
 from eurpe.retrieval import (
     ChromaIndex,
+    DuplicateAction,
     HierarchicalChunker,
     IndexingError,
+    evaluate_duplicate,
     index_proposal,
+    reindex_proposal,
 )
 from eurpe.schema import Programme, ProposalMetadata, SourceStatus
 
@@ -183,6 +187,35 @@ def _build_draft(original_filename: str, parsed_title: str | None) -> dict:
     return draft
 
 
+def _archive_filename(
+    staged_pdf_path: Path,
+    *,
+    token: str,
+    proposal: ProposalMetadata,
+) -> str:
+    """Return the archive filename for ``staged_pdf_path`` (no I/O).
+
+    Factored out of :func:`_archive_pdf` so the duplicate-detection step
+    can derive the prospective ``document_id`` (== the stem of the
+    archive name) before the file is copied. Keeping the function pure
+    is what lets the confirm route reject a duplicate *before*
+    mutating the filesystem, so blocked uploads leave no dead PDFs in
+    ``<runtime_dir>/proposals/``.
+
+    The archive name embeds programme / call / topic so the same PDF
+    can be re-ingested by Chroma's idempotent upsert (chunk_id is
+    derived from this stem via ``anchor.document_id``).
+    """
+
+    original_name = staged_pdf_path.name
+    token_prefix = f"{token}__"
+    if original_name.startswith(token_prefix):
+        original_name = original_name[len(token_prefix) :]
+    topic = proposal.topic_id or "whole-call"
+    archive_name = f"{proposal.programme.value}-{proposal.call_id}-{topic}-{original_name}"
+    return archive_name.replace("/", "_").replace("\\", "_")
+
+
 def _archive_pdf(
     staged_pdf_path: Path,
     *,
@@ -202,13 +235,7 @@ def _archive_pdf(
 
     proposal_dir = runtime_dir / "proposals"
     proposal_dir.mkdir(parents=True, exist_ok=True)
-    original_name = staged_pdf_path.name
-    token_prefix = f"{token}__"
-    if original_name.startswith(token_prefix):
-        original_name = original_name[len(token_prefix) :]
-    topic = proposal.topic_id or "whole-call"
-    archive_name = f"{proposal.programme.value}-{proposal.call_id}-{topic}-{original_name}"
-    archive_name = archive_name.replace("/", "_").replace("\\", "_")
+    archive_name = _archive_filename(staged_pdf_path, token=token, proposal=proposal)
     archive_path = proposal_dir / archive_name
     tmp = archive_path.with_suffix(archive_path.suffix + ".tmp")
     shutil.copyfile(staged_pdf_path, tmp)
@@ -383,6 +410,44 @@ def confirm(
         ingested_at=datetime.now(UTC),
     )
 
+    # Duplicate detection runs BEFORE we touch the filesystem so a
+    # rejected upload leaves no orphan archive in ``runtime_dir/proposals``.
+    # The hash is computed from the staged path; ``_archive_filename`` is a
+    # pure string helper so we can derive the prospective document_id
+    # without copying yet.
+    content_hash = compute_content_hash(record.pdf_path)
+    proposal = proposal.model_copy(update={"content_hash": content_hash})
+    prospective_archive_name = _archive_filename(
+        record.pdf_path,
+        token=body.parse_token,
+        proposal=proposal,
+    )
+    new_document_id = Path(prospective_archive_name).stem
+    decision = evaluate_duplicate(
+        index=index,
+        content_hash=content_hash,
+        proposal_title=proposal.proposal_title,
+        call_id=proposal.call_id,
+        new_document_id=new_document_id,
+    )
+    if decision.action is DuplicateAction.BLOCK_HARD:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"duplicate proposal: {decision.reason}",
+        )
+    if decision.action is DuplicateAction.BLOCK_SOFT and not body.force:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"duplicate suspected: {decision.reason} "
+                "Re-submit with force=true to replace."
+            ),
+        )
+
+    replaced_document_id: str | None = None
+    if decision.action in (DuplicateAction.REINDEX, DuplicateAction.BLOCK_SOFT):
+        replaced_document_id = decision.conflicting_document_id
+
     try:
         parsed = parser.parse(record.pdf_path)
     except IngestionError as exc:
@@ -402,12 +467,21 @@ def confirm(
     sidecar_path = _persist_sidecar(archived_pdf_path, proposal, runtime_dir=cfg.runtime_dir)
 
     try:
-        chunks_added = index_proposal(
-            parsed,
-            proposal,
-            chunker=chunker,
-            index=index,
-        )
+        if replaced_document_id is not None:
+            chunks_added = reindex_proposal(
+                parsed,
+                proposal,
+                chunker=chunker,
+                index=index,
+                replaced_document_id=replaced_document_id,
+            )
+        else:
+            chunks_added = index_proposal(
+                parsed,
+                proposal,
+                chunker=chunker,
+                index=index,
+            )
     except IndexingError as exc:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -419,8 +493,17 @@ def confirm(
     # captures the metadata.
     store.delete(body.parse_token)
 
+    # Surface the warning verbatim ONLY for the forced soft-duplicate
+    # case so the operator sees what they overrode; REINDEX is silent
+    # because the corrected-version intent is unambiguous.
+    duplicate_warning: str | None = None
+    if decision.action is DuplicateAction.BLOCK_SOFT:
+        duplicate_warning = decision.reason
+
     return ConfirmResponse(
         chunks_added=chunks_added,
         collection=index.collection_name,
         sidecar_path=str(sidecar_path),
+        duplicate_warning=duplicate_warning,
+        replaced_document_id=replaced_document_id,
     )
