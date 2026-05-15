@@ -104,6 +104,12 @@ def _metadata_to_chroma(meta: ChunkMetadata) -> dict[str, str | int | float | bo
     if proposal.ingested_at is not None:
         # ISO 8601 string keeps the value sortable in Chroma's filter language.
         flat["proposal.ingested_at"] = proposal.ingested_at.isoformat()
+    if proposal.content_hash is not None:
+        # Optional sha256 hex; only written for chunks ingested after the
+        # duplicate-detection feature landed. Older rows simply lack the
+        # key, which is why ``find_by_content_hash`` returns ``[]`` for
+        # them — see :meth:`ChromaIndex.find_by_content_hash`.
+        flat["proposal.content_hash"] = proposal.content_hash
     if meta.parent_section_heading is not None:
         flat["parent_section_heading"] = meta.parent_section_heading
     if anchor.section_heading is not None:
@@ -141,6 +147,7 @@ def _chroma_to_metadata(d: dict[str, Any]) -> ChunkMetadata:
         source_path=str(d["proposal.source_path"]),
         language=str(d.get("proposal.language", "en")),
         ingested_at=ingested_at,
+        content_hash=d.get("proposal.content_hash"),
     )
     anchor = CitationAnchor(
         document_id=str(d["anchor.document_id"]),
@@ -355,6 +362,116 @@ class ChromaIndex:
         """Return the number of vectors stored in this collection."""
 
         return int(self._collection.count())
+
+    # ------------------------------------------------------------------
+    # duplicate-detection / incremental-indexing helpers
+    # ------------------------------------------------------------------
+    #
+    # The methods below exist so the ingestion layer (HTTP route + CLI)
+    # can answer three operator-facing questions before upserting:
+    #
+    # * "Has this PDF been indexed before?" — same bytes, same hash.
+    # * "Have I seen this document under this filename before?" — by
+    #   ``anchor.document_id`` (the PDF stem after archival).
+    # * "Have I seen a different file with the same proposal_title and
+    #   call_id?" — the soft duplicate that operators most often want a
+    #   warning for.
+    #
+    # All three are read-only on the collection so they are safe to call
+    # outside any transaction.
+
+    def find_by_content_hash(self, content_hash: str) -> list[str]:
+        """Return unique ``document_id``s of chunks whose proposal hash matches.
+
+        Old chunks written before the content-hash field existed simply
+        lack the ``proposal.content_hash`` key in their Chroma metadata
+        row. Chroma's ``where`` filter matches only rows that *have* the
+        key, so pre-feature data is invisible to this query — that is by
+        design. Such rows become discoverable again the moment their
+        owning proposal is re-ingested.
+        """
+
+        result = self._collection.get(
+            where={"proposal.content_hash": content_hash},
+            include=["metadatas"],
+        )
+        metadatas = result.get("metadatas") or []
+        document_ids: list[str] = []
+        seen: set[str] = set()
+        for meta in metadatas:
+            if not meta:
+                continue
+            doc_id = meta.get("anchor.document_id")
+            if not isinstance(doc_id, str) or doc_id in seen:
+                continue
+            seen.add(doc_id)
+            document_ids.append(doc_id)
+        return document_ids
+
+    def find_by_title_and_call(
+        self, proposal_title: str | None, call_id: str
+    ) -> list[str]:
+        """Return unique ``document_id``s matching ``(proposal_title, call_id)``.
+
+        Returns ``[]`` early when ``proposal_title`` is falsy: the field is
+        optional on :class:`ProposalMetadata`, and two title-less records
+        in the same call would otherwise always collide and produce
+        spurious soft-duplicate warnings.
+        """
+
+        if not proposal_title:
+            return []
+        result = self._collection.get(
+            where={
+                "$and": [
+                    {"proposal.proposal_title": proposal_title},
+                    {"proposal.call_id": call_id},
+                ]
+            },
+            include=["metadatas"],
+        )
+        metadatas = result.get("metadatas") or []
+        document_ids: list[str] = []
+        seen: set[str] = set()
+        for meta in metadatas:
+            if not meta:
+                continue
+            doc_id = meta.get("anchor.document_id")
+            if not isinstance(doc_id, str) or doc_id in seen:
+                continue
+            seen.add(doc_id)
+            document_ids.append(doc_id)
+        return document_ids
+
+    def find_by_document_id(self, document_id: str) -> int:
+        """Return the number of chunks stored under ``anchor.document_id``.
+
+        Used by the dedup helper to detect the "corrected version" case
+        (a new ingest whose archive name collides with an existing one)
+        and by tests to assert delete-then-upsert left no orphans.
+        """
+
+        result = self._collection.get(
+            where={"anchor.document_id": document_id},
+            include=[],
+        )
+        ids = result.get("ids") or []
+        return len(ids)
+
+    def delete_by_document_id(self, document_id: str) -> int:
+        """Delete every chunk whose ``anchor.document_id`` matches and report the count.
+
+        Returns the number of chunks removed (zero when nothing matched).
+        The count is computed by diffing :meth:`find_by_document_id` before
+        and after rather than relying on Chroma's delete response shape,
+        which has shifted between versions.
+        """
+
+        before = self.find_by_document_id(document_id)
+        if before == 0:
+            return 0
+        self._collection.delete(where={"anchor.document_id": document_id})
+        return before
 
     def delete_collection(self) -> None:
         """Drop the collection. The on-disk database file is preserved.
