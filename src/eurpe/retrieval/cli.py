@@ -39,6 +39,7 @@ from eurpe.retrieval.embeddings import make_embedder
 from eurpe.retrieval.errors import IndexingError
 from eurpe.retrieval.index import ChromaIndex
 from eurpe.retrieval.models import Chunk
+from eurpe.retrieval.pipeline import index_proposal
 from eurpe.retrieval.retriever import (
     RetrievalPolicy,
     RetrievalResult,
@@ -206,15 +207,19 @@ def build(
             typer.echo(f"error: parsing failed for {pdf_path}: {exc}", err=True)
             raise typer.Exit(code=1) from exc
 
-        chunks = chunker.chunk(parsed, proposal_meta)
         try:
-            index.upsert(chunks)
+            chunk_count = index_proposal(
+                parsed,
+                proposal_meta,
+                chunker=chunker,
+                index=index,
+            )
         except IndexingError as exc:
             typer.echo(f"error: index upsert failed: {exc}", err=True)
             raise typer.Exit(code=1) from exc
 
-        total_added += len(chunks)
-        typer.echo(f"  ingested {yaml_path.name}: {len(chunks)} chunks from {pdf_path.name}")
+        total_added += chunk_count
+        typer.echo(f"  ingested {yaml_path.name}: {chunk_count} chunks from {pdf_path.name}")
 
     typer.echo("")
     typer.echo(

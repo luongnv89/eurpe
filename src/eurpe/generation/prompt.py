@@ -193,9 +193,7 @@ class SectionPromptBuilder:
         topic_context = request.topic_context
         topic_section_guidance: str | None = None
         if topic_context is not None:
-            topic_section_guidance = topic_context.section_guidance.get(
-                request.section_type
-            )
+            topic_section_guidance = topic_context.section_guidance.get(request.section_type)
 
         section_title = self._humanize_section_type(request.section_type)
         programme_label = (
@@ -204,17 +202,14 @@ class SectionPromptBuilder:
             else "Any (no programme filter)"
         )
         evidence_block = self._format_evidence(results, citations)
-        topic_context_block = self._format_topic_context_block(
-            topic_context, request.call_context
-        )
+        topic_context_block = self._format_topic_context_block(topic_context, request.call_context)
 
         # Build the section-guidance block, appending the per-section
         # topic guidance paragraph when present.
         guidance_block = f"{guidance}\n"
         if topic_section_guidance:
             guidance_block += (
-                f"\n**Topic requirements for this section:** "
-                f"{topic_section_guidance}\n"
+                f"\n**Topic requirements for this section:** {topic_section_guidance}\n"
             )
 
         prompt_parts = [

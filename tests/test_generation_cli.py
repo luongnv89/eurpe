@@ -865,9 +865,7 @@ def test_cli_rejects_invalid_render_mode(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-_TOPIC_FIXTURE_PATH = (
-    Path(__file__).parent / "fixtures" / "topics" / "sample_topic.txt"
-)
+_TOPIC_FIXTURE_PATH = Path(__file__).parent / "fixtures" / "topics" / "sample_topic.txt"
 
 
 def test_section_cli_accepts_topic_text(tmp_path: Path) -> None:

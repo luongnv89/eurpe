@@ -7,6 +7,12 @@ corpus_path: ./data/corpus
 # Where the local vector index is persisted.
 index_path: ./data/index
 
+# Where the FastAPI service stores short-lived runtime state — staging
+# uploads from the ingestion UI, parse-token records, and the YAML
+# sidecar archive written by POST /api/ingestion/confirm. Safe to wipe;
+# nothing here is the source of truth for the corpus or the index.
+runtime_dir: ./data/runtime
+
 # Local model runtime configuration (no network calls in offline mode).
 models:
   runtime: ollama        # ollama | mlx | vllm

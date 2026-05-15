@@ -51,6 +51,14 @@ class EurpeConfig(BaseModel):
 
     corpus_path: Path = Field(default=Path("./data/corpus"))
     index_path: Path = Field(default=Path("./data/index"))
+    # ``runtime_dir`` is the parent for short-lived state owned by the
+    # FastAPI service: staging uploads, parse-token records, and the
+    # YAML sidecar archive written by ``POST /api/ingestion/confirm``.
+    # Kept separate from ``corpus_path`` (where curated proposals live) so
+    # an operator can wipe runtime state without touching the corpus, and
+    # separate from ``index_path`` (Chroma's home) so a backend swap does
+    # not collide with upload bookkeeping.
+    runtime_dir: Path = Field(default=Path("./data/runtime"))
     models: ModelsConfig = Field(default_factory=ModelsConfig)
     offline_mode: bool = Field(default=True)
     log_level: str = Field(default="INFO")
@@ -73,11 +81,20 @@ class EurpeConfig(BaseModel):
         anchor = (base or REPO_ROOT).resolve()
         corpus = self.corpus_path
         index = self.index_path
+        runtime = self.runtime_dir
         if not corpus.is_absolute():
             corpus = (anchor / corpus).resolve()
         if not index.is_absolute():
             index = (anchor / index).resolve()
-        return self.model_copy(update={"corpus_path": corpus, "index_path": index})
+        if not runtime.is_absolute():
+            runtime = (anchor / runtime).resolve()
+        return self.model_copy(
+            update={
+                "corpus_path": corpus,
+                "index_path": index,
+                "runtime_dir": runtime,
+            }
+        )
 
 
 def ensure_config_file(
@@ -116,6 +133,7 @@ def load_config(config_path: Path | None = None) -> EurpeConfig:
 
 
 def ensure_runtime_dirs(config: EurpeConfig) -> None:
-    """Create the corpus and index directories on disk if they do not exist."""
+    """Create the corpus, index, and runtime directories on disk if they do not exist."""
     config.corpus_path.mkdir(parents=True, exist_ok=True)
     config.index_path.mkdir(parents=True, exist_ok=True)
+    config.runtime_dir.mkdir(parents=True, exist_ok=True)
