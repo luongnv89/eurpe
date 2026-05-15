@@ -142,8 +142,7 @@ class ProposalMetadata(BaseModel):
             return value
         if not _SHA256_HEX_RE.fullmatch(value):
             raise ValueError(
-                "content_hash must be a 64-character lowercase sha256 hex digest, "
-                f"got {value!r}"
+                f"content_hash must be a 64-character lowercase sha256 hex digest, got {value!r}"
             )
         return value
 

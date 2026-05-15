@@ -408,9 +408,7 @@ class ChromaIndex:
             document_ids.append(doc_id)
         return document_ids
 
-    def find_by_title_and_call(
-        self, proposal_title: str | None, call_id: str
-    ) -> list[str]:
+    def find_by_title_and_call(self, proposal_title: str | None, call_id: str) -> list[str]:
         """Return unique ``document_id``s matching ``(proposal_title, call_id)``.
 
         Returns ``[]`` early when ``proposal_title`` is falsy: the field is

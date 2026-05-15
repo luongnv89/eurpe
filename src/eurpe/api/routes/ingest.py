@@ -439,8 +439,7 @@ def confirm(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=(
-                f"duplicate suspected: {decision.reason} "
-                "Re-submit with force=true to replace."
+                f"duplicate suspected: {decision.reason} Re-submit with force=true to replace."
             ),
         )
 
