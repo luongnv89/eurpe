@@ -52,6 +52,12 @@ from eurpe.generation.llm import make_llm_client
 from eurpe.generation.models import GenerationDraft, GenerationRequest
 from eurpe.generation.render import MarkdownCitationRenderer
 from eurpe.generation.workflow import SectionGenerationWorkflow
+from eurpe.ingestion.errors import ParserError
+from eurpe.intake import (
+    TopicContext,
+    extract_topic_context_from_pdf,
+    extract_topic_context_from_text,
+)
 from eurpe.retrieval import (
     ChromaIndex,
     RetrievalPolicy,
@@ -226,6 +232,24 @@ def section(
             "``@path/to/file`` to read from a file."
         ),
     ),
+    topic_text: str = typer.Option(
+        "",
+        "--topic-text",
+        help=(
+            "Structured topic context as plaintext. Pass literal text, or "
+            "``@path/to/file`` to read from a file. Mutually exclusive with "
+            "--topic-pdf. Coexists with --context."
+        ),
+    ),
+    topic_pdf: Path | None = typer.Option(
+        None,
+        "--topic-pdf",
+        help=(
+            "Path to a PDF excerpt of the Work Programme topic page. "
+            "Parsed via Docling in offline mode. Mutually exclusive with "
+            "--topic-text."
+        ),
+    ),
     programme: str | None = typer.Option(
         None,
         "--programme",
@@ -370,6 +394,31 @@ def section(
     # into a non-zero exit with a friendly message).
     resolved_context = _load_context(context)
 
+    # ``--topic-text`` and ``--topic-pdf`` cannot coexist: each is a
+    # different *input mode* for the same TopicContext slot. We refuse
+    # to silently prefer one — operators must pick.
+    if topic_text and topic_pdf is not None:
+        typer.echo(
+            "error: --topic-text and --topic-pdf are mutually exclusive; "
+            "pass one of them, not both.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    topic_context: TopicContext | None = None
+    if topic_text:
+        resolved_topic_text = _load_context(topic_text)
+        topic_context = extract_topic_context_from_text(resolved_topic_text)
+    elif topic_pdf is not None:
+        try:
+            topic_context = extract_topic_context_from_pdf(topic_pdf)
+        except ParserError as exc:
+            typer.echo(
+                f"error: failed to parse --topic-pdf {topic_pdf}: {exc}",
+                err=True,
+            )
+            raise typer.Exit(code=1) from exc
+
     request = GenerationRequest(
         section_type=section_enum,
         user_intent=intent,
@@ -377,6 +426,7 @@ def section(
         target_programme=programme_enum,
         top_k_examples=top_k,
         lessons_learned=lessons_learned,
+        topic_context=topic_context,
     )
 
     typer.echo(
