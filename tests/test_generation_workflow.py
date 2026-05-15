@@ -498,3 +498,44 @@ def test_workflow_exposes_read_only_llm_and_retriever(tmp_path) -> None:  # type
     workflow = _build_workflow(tmp_path)
     assert workflow.llm.model == "deterministic-stub-v1"
     assert isinstance(workflow.retriever, SourceStatusAwareRetriever)
+
+
+# ---------------------------------------------------------------------------
+# Issue #9 — topic_context echoed onto the draft for audit.
+# ---------------------------------------------------------------------------
+
+
+def test_workflow_records_topic_context_in_draft(tmp_path) -> None:  # type: ignore[no-untyped-def]
+    """A request's ``topic_context`` is echoed onto the produced draft.
+
+    Mirrors the ``drafting_profile`` audit contract — a stored draft
+    must record exactly which structured topic context shaped it so an
+    auditor can replay the inputs.
+    """
+
+    from eurpe.intake import TopicContext, TopicSource
+
+    topic_ctx = TopicContext(
+        programme=Programme.HORIZON_EUROPE,
+        call_id="HORIZON-CL3-2024-CS-01",
+        topic_id="952672",
+        topic_title="Resilient digital infrastructure",
+        expected_outcomes=["outcome 1"],
+        raw_text="raw",
+        source=TopicSource.PASTED_TEXT,
+    )
+
+    workflow = _build_workflow(tmp_path)
+    request = GenerationRequest(
+        section_type=SectionType.METHODOLOGY,
+        user_intent="Describe our deep learning approach for methodology",
+        top_k_examples=5,
+        topic_context=topic_ctx,
+    )
+    draft = workflow.run(request)
+
+    assert draft.topic_context is not None
+    assert draft.topic_context == topic_ctx
+    # The draft's request also echoes the topic_context (Pydantic copies
+    # via validation, so identity may differ but equality must hold).
+    assert draft.request.topic_context == topic_ctx

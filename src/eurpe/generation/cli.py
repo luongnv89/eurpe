@@ -52,6 +52,12 @@ from eurpe.generation.llm import make_llm_client
 from eurpe.generation.models import GenerationDraft, GenerationRequest
 from eurpe.generation.render import MarkdownCitationRenderer
 from eurpe.generation.workflow import SectionGenerationWorkflow
+from eurpe.ingestion.errors import IngestionError
+from eurpe.intake import (
+    TopicContext,
+    extract_topic_context_from_pdf,
+    extract_topic_context_from_text,
+)
 from eurpe.retrieval import (
     ChromaIndex,
     RetrievalPolicy,
@@ -70,14 +76,18 @@ generate_app = typer.Typer(
 )
 
 
-def _load_context(value: str) -> str:
-    """Resolve ``--context`` value: literal text or ``@path/to/file`` reference.
+def _load_context(value: str, *, flag: str = "--context") -> str:
+    """Resolve a flag value: literal text or ``@path/to/file`` reference.
 
     The ``@``-prefixed file form mirrors a common CLI convention
     (curl, gh) and avoids the awkwardness of pasting multi-paragraph
     call text on a command line. A literal ``@`` at start can be
     escaped by doubling (``@@`` → ``@``) for the rare user who
     wants verbatim ``@``-prefixed text.
+
+    ``flag`` names the user-facing option in the error message so the
+    helper can be reused by ``--topic-text`` without producing a
+    misleading "--context" reference.
     """
 
     if not value:
@@ -87,7 +97,7 @@ def _load_context(value: str) -> str:
     if value.startswith("@"):
         path = Path(value[1:])
         if not path.exists():
-            raise typer.BadParameter(f"--context points to a file that does not exist: {path}")
+            raise typer.BadParameter(f"{flag} points to a file that does not exist: {path}")
         return path.read_text(encoding="utf-8")
     return value
 
@@ -224,6 +234,24 @@ def section(
         help=(
             "Optional call/topic context. Pass literal text, or "
             "``@path/to/file`` to read from a file."
+        ),
+    ),
+    topic_text: str = typer.Option(
+        "",
+        "--topic-text",
+        help=(
+            "Structured topic context as plaintext. Pass literal text, or "
+            "``@path/to/file`` to read from a file. Mutually exclusive with "
+            "--topic-pdf. Coexists with --context."
+        ),
+    ),
+    topic_pdf: Path | None = typer.Option(
+        None,
+        "--topic-pdf",
+        help=(
+            "Path to a PDF excerpt of the Work Programme topic page. "
+            "Parsed via Docling in offline mode. Mutually exclusive with "
+            "--topic-text."
         ),
     ),
     programme: str | None = typer.Option(
@@ -370,6 +398,31 @@ def section(
     # into a non-zero exit with a friendly message).
     resolved_context = _load_context(context)
 
+    # ``--topic-text`` and ``--topic-pdf`` cannot coexist: each is a
+    # different *input mode* for the same TopicContext slot. We refuse
+    # to silently prefer one — operators must pick.
+    if topic_text and topic_pdf is not None:
+        typer.echo(
+            "error: --topic-text and --topic-pdf are mutually exclusive; "
+            "pass one of them, not both.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    topic_context: TopicContext | None = None
+    if topic_text:
+        resolved_topic_text = _load_context(topic_text, flag="--topic-text")
+        topic_context = extract_topic_context_from_text(resolved_topic_text)
+    elif topic_pdf is not None:
+        try:
+            topic_context = extract_topic_context_from_pdf(topic_pdf, config=cfg)
+        except IngestionError as exc:
+            typer.echo(
+                f"error: failed to parse --topic-pdf {topic_pdf}: {exc}",
+                err=True,
+            )
+            raise typer.Exit(code=1) from exc
+
     request = GenerationRequest(
         section_type=section_enum,
         user_intent=intent,
@@ -377,6 +430,7 @@ def section(
         target_programme=programme_enum,
         top_k_examples=top_k,
         lessons_learned=lessons_learned,
+        topic_context=topic_context,
     )
 
     typer.echo(

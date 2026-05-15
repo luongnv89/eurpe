@@ -181,6 +181,7 @@ class SectionGenerationWorkflow:
             model=self._llm.model,
             request=request,
             drafting_profile=profile.name if profile is not None else None,
+            topic_context=request.topic_context,
         )
 
     # ------------------------------------------------------------------

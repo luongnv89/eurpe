@@ -858,3 +858,90 @@ def test_cli_rejects_invalid_render_mode(tmp_path: Path) -> None:
     )
     assert result.exit_code == 1, result.output
     assert "--render" in result.output
+
+
+# ---------------------------------------------------------------------------
+# Issue #9 — --topic-text / --topic-pdf intake flags.
+# ---------------------------------------------------------------------------
+
+
+_TOPIC_FIXTURE_PATH = (
+    Path(__file__).parent / "fixtures" / "topics" / "sample_topic.txt"
+)
+
+
+def test_section_cli_accepts_topic_text(tmp_path: Path) -> None:
+    """``--topic-text @<sample>.txt`` runs cleanly and reaches the prompt.
+
+    ``--no-audit`` is set because the deterministic stub trips the
+    runtime audit gate regardless of inputs (issue #45); the
+    assertion targets the structured-topic plumbing, not the audit.
+    """
+
+    cfg_path = _write_offline_config(tmp_path)
+    _seed_index_with_fixtures(tmp_path)
+    out_path = tmp_path / "draft.json"
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "generate",
+            "section",
+            "--type",
+            "methodology",
+            "--intent",
+            "Describe our methodology",
+            "--topic-text",
+            f"@{_TOPIC_FIXTURE_PATH}",
+            "--threshold",
+            "0.0",
+            "--no-audit",
+            "--output",
+            str(out_path),
+            "--config",
+            str(cfg_path),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(out_path.read_text(encoding="utf-8"))
+    # The structured topic_context is recorded on the draft.
+    assert payload["topic_context"] is not None
+    assert payload["topic_context"]["topic_id"] == "952672"
+    # The prompt the LLM saw renders the structured label lines.
+    assert "**Topic ID:** 952672" in payload["prompt_used"]
+
+
+def test_section_cli_rejects_both_topic_text_and_topic_pdf(tmp_path: Path) -> None:
+    """``--topic-text`` and ``--topic-pdf`` together → exit 1 with a clean error."""
+
+    cfg_path = _write_offline_config(tmp_path)
+    _seed_index_with_fixtures(tmp_path)
+    fake_pdf = tmp_path / "topic.pdf"
+    fake_pdf.write_bytes(b"%PDF-fake")
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "generate",
+            "section",
+            "--type",
+            "methodology",
+            "--intent",
+            "x",
+            "--topic-text",
+            "Topic: 1\nExpected Outcomes:\n- one",
+            "--topic-pdf",
+            str(fake_pdf),
+            "--threshold",
+            "0.0",
+            "--no-audit",
+            "--config",
+            str(cfg_path),
+        ],
+    )
+
+    assert result.exit_code == 1, result.output
+    assert "mutually exclusive" in result.output

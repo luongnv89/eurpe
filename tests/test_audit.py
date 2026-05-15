@@ -523,6 +523,54 @@ def test_audit_rendered_also_fires_runtime_gates() -> None:
 # ---------------------------------------------------------------------------
 
 
+def test_audit_does_not_count_topic_context_as_evidence() -> None:
+    """A populated ``topic_context`` does NOT silence ``no_evidence_escape``.
+
+    AC #1 of issue #45 — and a new contract for issue #9: the audit
+    gates on the *citation list*, not on auxiliary inputs. Topic
+    context is structured input, not retrieved evidence; a draft that
+    admits "no retrieved evidence was available" must still fail the
+    audit even when a TopicContext is attached.
+    """
+
+    from eurpe.intake import TopicContext, TopicSource
+
+    topic_ctx = TopicContext(
+        programme=Programme.HORIZON_EUROPE,
+        call_id="HORIZON-CL3-2024-CS-01",
+        topic_id="952672",
+        topic_title="Resilient digital infrastructure",
+        expected_outcomes=["outcome 1"],
+        raw_text="raw",
+        source=TopicSource.PASTED_TEXT,
+    )
+
+    request = GenerationRequest(
+        section_type=SectionType.METHODOLOGY,
+        user_intent="Describe the approach.",
+        topic_context=topic_ctx,
+    )
+    draft = GenerationDraft(
+        section_type=SectionType.METHODOLOGY,
+        text=(
+            "Draft for the Methodology section. "
+            "No retrieved evidence was available; expand the index "
+            "with relevant past proposals before relying on this draft."
+        ),
+        citations=[],
+        prompt_used="(prompt elided in tests)",
+        model="deterministic-stub-v1",
+        request=request,
+        topic_context=topic_ctx,
+    )
+
+    result = CitationAudit().audit_draft(draft)
+
+    assert result.passed is False
+    codes = {f.code for f in result.errors}
+    assert "no_evidence_escape" in codes
+
+
 def test_audit_fails_when_programme_is_none() -> None:
     """A ``None`` programme (bypassing Pydantic) → ``empty_programme`` ERROR."""
 
