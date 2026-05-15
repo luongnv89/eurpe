@@ -16,14 +16,16 @@ Run locally with::
     uvicorn eurpe.api.main:app --host 127.0.0.1 --port 8765
 
 Binding to ``127.0.0.1`` keeps the service inside the local machine; do
-not expose this to a public interface. The startup hook below logs the
-intended invariant so an operator running ``uvicorn`` with a different
+not expose this to a public interface. The lifespan context below logs
+the intended invariant so an operator running ``uvicorn`` with a different
 ``--host`` sees the warning before they get past the splash output.
 """
 
 from __future__ import annotations
 
 import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
@@ -32,20 +34,10 @@ from eurpe.api.routes import ingest as ingest_routes
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI(
-    title="EURPE Local API",
-    version=__version__,
-    description="Local-only HTTP API for the EURPE proposal-drafting assistant.",
-)
 
-# Register feature routers. Each router carries its own ``prefix`` so the
-# top-level app stays free of route-by-route URL knowledge.
-app.include_router(ingest_routes.router)
-
-
-@app.on_event("startup")
-def _log_local_only_invariant() -> None:
-    """Remind operators the API is local-only on startup.
+@asynccontextmanager
+async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    """Log the local-only invariant on startup; no shutdown hook needed.
 
     Uvicorn prints the bind address itself so we don't try to second-guess
     it here — but the offline-mode + 127.0.0.1 expectation is worth a log
@@ -57,6 +49,21 @@ def _log_local_only_invariant() -> None:
         "exposing this service to a public interface violates the offline contract.",
         __version__,
     )
+    yield
+    # No teardown work required: caches sit on the dependency module
+    # itself and survive a worker reload by design.
+
+
+app = FastAPI(
+    title="EURPE Local API",
+    version=__version__,
+    description="Local-only HTTP API for the EURPE proposal-drafting assistant.",
+    lifespan=_lifespan,
+)
+
+# Register feature routers. Each router carries its own ``prefix`` so the
+# top-level app stays free of route-by-route URL knowledge.
+app.include_router(ingest_routes.router)
 
 
 @app.get("/health")
