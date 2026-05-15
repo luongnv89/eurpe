@@ -1,0 +1,24 @@
+HORIZON-CL3-2024-CS-01 — Resilient digital infrastructure
+
+Programme: Horizon Europe
+Call: HORIZON-CL3-2024-CS-01
+Topic: 952672
+Topic title: Resilient digital infrastructure for critical sectors
+
+Destination: Cluster 3 — Civil Security for Society
+
+Expected Outcomes:
+- Reduced mean-time-to-recover for critical-sector outages by 30%.
+- New open standards for resilient communication protocols.
+- Trained workforce across 5+ EU member states.
+
+Scope:
+Proposals should address the resilience of digital infrastructure
+supporting essential services (energy, water, transport, finance),
+including detection, response, and recovery.
+
+Methodology guidance:
+Validate the approach on at least two real-world pilots with
+operators in different member states.
+
+Type of action: RIA
