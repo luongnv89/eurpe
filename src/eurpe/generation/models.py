@@ -38,6 +38,7 @@ from datetime import UTC, datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from eurpe.intake.models import TopicContext
 from eurpe.schema import Programme, SectionType, SourceStatus
 
 
@@ -170,6 +171,17 @@ class GenerationRequest(BaseModel):
             "renderer should frame those citations as 'what to avoid'."
         ),
     )
+    topic_context: TopicContext | None = Field(
+        default=None,
+        description=(
+            "Optional structured call/topic context extracted from pasted "
+            "text or an uploaded Work Programme PDF excerpt. When provided, "
+            "the prompt renders programme, topic ID/title, expected outcomes, "
+            "scope, and section-specific guidance as discrete sub-blocks "
+            "and instructs the LLM to reference them. Coexists with the "
+            "free-text ``call_context`` field — both are rendered when set."
+        ),
+    )
 
 
 class GenerationDraft(BaseModel):
@@ -232,6 +244,14 @@ class GenerationDraft(BaseModel):
             "applied (default guidance used). Recorded for audit and "
             "traceability — lets an operator trace which programme-specific "
             "guidance shaped the draft."
+        ),
+    )
+    topic_context: TopicContext | None = Field(
+        default=None,
+        description=(
+            "Echo of the TopicContext used for this draft, when one was "
+            "supplied. Recorded for audit and traceability — mirrors how "
+            "drafting_profile records the applied programme guidance."
         ),
     )
 

@@ -249,9 +249,16 @@ def _extract_block_after_heading(text: str, heading: str) -> str | None:
         return None
     start = head_match.end()
 
-    # Find the next heading-line terminator after ``start``.
+    # Find the next heading-line terminator after ``start``. Allow
+    # either a standalone heading (``Scope`` alone, or ``Scope:`` on a
+    # bare line) or an inline label form (``Type of action: RIA``).
+    # The inline form is what real Work Programme excerpts use when a
+    # short value follows; we still treat it as a heading because the
+    # block above it has ended.
     terminator_pattern = re.compile(
-        r"^[ \t]*(?:" + "|".join(re.escape(t) for t in _BLOCK_TERMINATORS) + r")[ \t]*:?[ \t]*$",
+        r"^[ \t]*(?:"
+        + "|".join(re.escape(t) for t in _BLOCK_TERMINATORS)
+        + r")[ \t]*(?:[:]|$)",
         re.IGNORECASE | re.MULTILINE,
     )
     end = len(text)

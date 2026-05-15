@@ -39,8 +39,9 @@ from __future__ import annotations
 
 from eurpe.generation.models import CitationRef, GenerationRequest
 from eurpe.generation.profiles import DraftingProfile
+from eurpe.intake.models import TopicContext
 from eurpe.retrieval import RetrievalResult
-from eurpe.schema import SectionType, SourceStatus
+from eurpe.schema import Programme, SectionType, SourceStatus
 
 #: Cap on the snippet length included in the prompt's evidence list and in the
 #: :class:`CitationRef.snippet` field. 300 chars is enough to convey the gist
@@ -183,16 +184,39 @@ class SectionPromptBuilder:
             )
             expected_outputs = []
 
+        # When the supplied TopicContext carries a per-section guidance
+        # entry for this request's section, append it to the existing
+        # (profile / default) guidance under a labelled paragraph. The
+        # prefix is part of the prompt contract — pinned by the
+        # ``test_prompt_renders_topic_section_guidance_under_section_guidance_block``
+        # test.
+        topic_context = request.topic_context
+        topic_section_guidance: str | None = None
+        if topic_context is not None:
+            topic_section_guidance = topic_context.section_guidance.get(
+                request.section_type
+            )
+
         section_title = self._humanize_section_type(request.section_type)
         programme_label = (
             self._humanize_programme(request.target_programme)
             if request.target_programme is not None
             else "Any (no programme filter)"
         )
-        call_context = request.call_context.strip() or "(none provided)"
         evidence_block = self._format_evidence(results, citations)
+        topic_context_block = self._format_topic_context_block(
+            topic_context, request.call_context
+        )
 
-        # Build the prompt with optional expected outputs section.
+        # Build the section-guidance block, appending the per-section
+        # topic guidance paragraph when present.
+        guidance_block = f"{guidance}\n"
+        if topic_section_guidance:
+            guidance_block += (
+                f"\n**Topic requirements for this section:** "
+                f"{topic_section_guidance}\n"
+            )
+
         prompt_parts = [
             "# EU Proposal Section Drafting Task\n",
             "\n",
@@ -201,7 +225,7 @@ class SectionPromptBuilder:
             f"**User intent:** {request.user_intent}\n",
             "\n",
             "## Section guidance\n",
-            f"{guidance}\n",
+            guidance_block,
         ]
 
         # Add expected outputs if the profile defines them.
@@ -220,7 +244,7 @@ class SectionPromptBuilder:
             [
                 "\n",
                 "## Call / topic context\n",
-                f"{call_context}\n",
+                f"{topic_context_block}\n",
                 "\n",
                 "## Retrieved evidence\n",
                 "Use the following examples from past proposals as inspiration. "
@@ -236,9 +260,22 @@ class SectionPromptBuilder:
                 "Cite supporting evidence inline using [N] markers matching the numbered "
                 "list above. Do not invent information not supported by the retrieved "
                 "evidence. If a citation is from a REJECTED example, frame it as a "
-                "cautionary lesson. Do not cite ESR notes as fact.\n",
+                "cautionary lesson. Do not cite ESR notes as fact.",
             ]
         )
+
+        # AC #3 of issue #9: when a TopicContext carries expected
+        # outcomes, instruct the LLM to reference them in the draft.
+        # The exact wording is pinned by the
+        # ``test_prompt_includes_expected_outcomes_instruction_when_topic_supplied``
+        # test.
+        if topic_context is not None and topic_context.expected_outcomes:
+            prompt_parts.append(
+                " Reference the supplied Expected Outcomes from the call / topic "
+                "context where appropriate, framing the draft so it explicitly "
+                "addresses the topic's intended outcomes."
+            )
+        prompt_parts.append("\n")
 
         prompt = "".join(prompt_parts)
 
@@ -315,17 +352,87 @@ class SectionPromptBuilder:
         return "\n".join(lines).rstrip()
 
     @staticmethod
+    def _format_topic_context_block(
+        topic_context: TopicContext | None,
+        call_context: str,
+    ) -> str:
+        """Render the ``## Call / topic context`` block body.
+
+        Three rendering paths, picked by inputs:
+
+        1. ``topic_context is None`` — fall back to the legacy free-text
+           rendering: ``call_context`` verbatim, or ``(none provided)``
+           when empty. This preserves the pre-issue-#9 behaviour.
+        2. ``topic_context`` set — render programme / call id / topic id
+           / title / destination / expected-outcomes / scope as a
+           series of labelled lines. Any unset field is omitted. When
+           ``call_context`` is also non-empty, its text appears
+           appended under a ``**Free-text notes:**`` sub-block so
+           operators can keep pasting additional notes alongside the
+           structured context.
+        3. Edge case: a TopicContext with every parsed field empty
+           still renders to (effectively) the legacy path because no
+           label lines will be emitted.
+
+        The ``**Programme:**`` / ``**Call ID:**`` / ``**Topic ID:**`` /
+        ``**Topic title:**`` / ``**Expected outcomes:**`` / ``**Scope:**``
+        / ``**Destination:**`` labels are part of the prompt contract;
+        they are pinned by the prompt-builder tests.
+        """
+
+        call_context_stripped = call_context.strip()
+
+        if topic_context is None:
+            return call_context_stripped or "(none provided)"
+
+        lines: list[str] = []
+        if topic_context.programme is not None:
+            lines.append(
+                f"**Programme:** {SectionPromptBuilder._humanize_programme(topic_context.programme)}"
+            )
+        if topic_context.call_id:
+            lines.append(f"**Call ID:** {topic_context.call_id}")
+        if topic_context.topic_id:
+            lines.append(f"**Topic ID:** {topic_context.topic_id}")
+        if topic_context.topic_title:
+            lines.append(f"**Topic title:** {topic_context.topic_title}")
+        if topic_context.destination:
+            lines.append(f"**Destination:** {topic_context.destination}")
+
+        if topic_context.expected_outcomes:
+            lines.append("")
+            lines.append("**Expected outcomes:**")
+            for outcome in topic_context.expected_outcomes:
+                lines.append(f"* {outcome}")
+
+        if topic_context.scope:
+            lines.append("")
+            lines.append(f"**Scope:** {topic_context.scope}")
+
+        if call_context_stripped:
+            lines.append("")
+            lines.append("**Free-text notes:**")
+            lines.append(call_context_stripped)
+
+        rendered = "\n".join(lines).strip()
+        # Defensive: if the TopicContext was entirely empty and no
+        # call_context was supplied, fall back to the legacy marker so
+        # the prompt structure is preserved.
+        return rendered or "(none provided)"
+
+    @staticmethod
     def _humanize_section_type(section_type: SectionType) -> str:
         """``METHODOLOGY`` → ``"Methodology"``; ``IMPACT_PATHWAY`` → ``"Impact Pathway"``."""
 
         return section_type.value.replace("_", " ").title()
 
     @staticmethod
-    def _humanize_programme(programme) -> str:  # type: ignore[no-untyped-def]
+    def _humanize_programme(programme: Programme) -> str:
         """``HORIZON_EUROPE`` → ``"Horizon Europe"``; ``CEF`` → ``"Cef"``.
 
-        Typed loosely so callers can pass ``None`` checks at the call
-        site rather than threading ``Optional`` through here.
+        Callers are responsible for null-checking; the
+        ``request.target_programme is not None`` guard at the call site
+        in :meth:`build` is the contract.
         """
 
         return programme.value.replace("_", " ").title()
