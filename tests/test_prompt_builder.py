@@ -302,3 +302,217 @@ def test_evidence_block_uses_pinned_marker_format() -> None:
     pattern = re.compile(r"^\[(\d{1,2})\]\s+\*\*", re.MULTILINE)
     found = sorted({int(m.group(1)) for m in pattern.finditer(prompt)})
     assert found == [1, 2]
+
+
+# ---------------------------------------------------------------------------
+# Issue #9 — structured topic_context rendering in the prompt.
+# ---------------------------------------------------------------------------
+
+
+def _topic_context(
+    *,
+    section_guidance_for: SectionType | None = None,
+) -> "TopicContext":
+    """Build a fully-populated :class:`TopicContext` for prompt assertions.
+
+    ``section_guidance_for`` lets a test request a guidance entry on a
+    specific section without re-pasting the full struct.
+    """
+
+    from eurpe.intake import TopicContext, TopicSource
+
+    section_guidance: dict[SectionType, str] = {}
+    if section_guidance_for is not None:
+        section_guidance[section_guidance_for] = (
+            "Validate the approach on at least two real-world pilots."
+        )
+
+    return TopicContext(
+        programme=Programme.HORIZON_EUROPE,
+        call_id="HORIZON-CL3-2024-CS-01",
+        topic_id="952672",
+        topic_title="Resilient digital infrastructure for critical sectors",
+        expected_outcomes=[
+            "Reduced mean-time-to-recover by 30%.",
+            "New open standards for protocols.",
+        ],
+        scope="Proposals should address resilience of digital infrastructure.",
+        destination="Cluster 3 — Civil Security for Society",
+        section_guidance=section_guidance,
+        raw_text="(unused in tests)",
+        source=TopicSource.PASTED_TEXT,
+    )
+
+
+def test_prompt_includes_structured_topic_context_when_provided() -> None:
+    """All six label lines + outcomes + scope appear when topic_context is set.
+
+    Pins the rendering contract on which the React UI / FastAPI route
+    will eventually rely.
+    """
+
+    from eurpe.intake import TopicContext  # noqa: F401 — type used in helper
+
+    builder = SectionPromptBuilder()
+    req = GenerationRequest(
+        section_type=SectionType.METHODOLOGY,
+        user_intent="x",
+        topic_context=_topic_context(),
+    )
+    prompt, _ = builder.build(req, [])
+
+    # Label lines — exact-match each.
+    assert "**Programme:** Horizon Europe" in prompt
+    assert "**Call ID:** HORIZON-CL3-2024-CS-01" in prompt
+    assert "**Topic ID:** 952672" in prompt
+    assert "**Topic title:** Resilient digital infrastructure for critical sectors" in prompt
+    assert "**Destination:** Cluster 3 — Civil Security for Society" in prompt
+    # Outcomes bullets appear verbatim.
+    assert "* Reduced mean-time-to-recover by 30%." in prompt
+    assert "* New open standards for protocols." in prompt
+    # Scope appears under its label.
+    assert "**Scope:** Proposals should address resilience of digital infrastructure." in prompt
+
+
+def test_prompt_includes_expected_outcomes_instruction_when_topic_supplied() -> None:
+    """AC #3 keystone: the exact instruction sentence appears in the prompt.
+
+    The wording is pinned because the React UI demo / acceptance test
+    asserts on it verbatim. Changing the wording is a contract change.
+    """
+
+    builder = SectionPromptBuilder()
+    req = GenerationRequest(
+        section_type=SectionType.METHODOLOGY,
+        user_intent="x",
+        topic_context=_topic_context(),
+    )
+    prompt, _ = builder.build(req, [])
+
+    assert (
+        "Reference the supplied Expected Outcomes from the call / topic context "
+        "where appropriate, framing the draft so it explicitly addresses the "
+        "topic's intended outcomes."
+    ) in prompt
+
+
+def test_prompt_omits_expected_outcomes_instruction_when_no_topic_outcomes() -> None:
+    """No topic_context → no Expected-Outcomes reference instruction."""
+
+    builder = SectionPromptBuilder()
+    req = GenerationRequest(
+        section_type=SectionType.METHODOLOGY,
+        user_intent="x",
+        call_context="Some pasted call text",
+    )
+    prompt, _ = builder.build(req, [])
+
+    assert "Reference the supplied Expected Outcomes" not in prompt
+
+
+def test_prompt_omits_expected_outcomes_instruction_when_topic_outcomes_empty() -> None:
+    """A topic_context with no outcomes also suppresses the instruction."""
+
+    from eurpe.intake import TopicContext, TopicSource
+
+    ctx = TopicContext(
+        topic_id="952672",
+        source=TopicSource.PASTED_TEXT,
+    )
+
+    builder = SectionPromptBuilder()
+    req = GenerationRequest(
+        section_type=SectionType.METHODOLOGY,
+        user_intent="x",
+        topic_context=ctx,
+    )
+    prompt, _ = builder.build(req, [])
+
+    assert "Reference the supplied Expected Outcomes" not in prompt
+
+
+def test_prompt_renders_topic_section_guidance_under_section_guidance_block() -> None:
+    """Topic-supplied section guidance appears under its labelled prefix.
+
+    The ``**Topic requirements for this section:**`` prefix is part of
+    the prompt contract — pinned here so a future refactor of
+    :meth:`build` cannot silently drop it.
+    """
+
+    builder = SectionPromptBuilder()
+    req = GenerationRequest(
+        section_type=SectionType.METHODOLOGY,
+        user_intent="x",
+        topic_context=_topic_context(section_guidance_for=SectionType.METHODOLOGY),
+    )
+    prompt, _ = builder.build(req, [])
+
+    assert (
+        "**Topic requirements for this section:** Validate the approach on at "
+        "least two real-world pilots."
+    ) in prompt
+    # The guidance must sit BEFORE the "## Call / topic context" block —
+    # i.e., inside the section-guidance block.
+    guidance_idx = prompt.index("**Topic requirements for this section:**")
+    ctc_idx = prompt.index("## Call / topic context")
+    assert guidance_idx < ctc_idx
+
+
+def test_prompt_does_not_render_topic_section_guidance_for_other_sections() -> None:
+    """Guidance keyed on Methodology does NOT leak into an Impact prompt."""
+
+    builder = SectionPromptBuilder()
+    req = GenerationRequest(
+        section_type=SectionType.IMPACT,
+        user_intent="x",
+        topic_context=_topic_context(section_guidance_for=SectionType.METHODOLOGY),
+    )
+    prompt, _ = builder.build(req, [])
+
+    assert "**Topic requirements for this section:**" not in prompt
+
+
+def test_prompt_renders_call_context_alongside_topic_context_under_freetext_notes() -> None:
+    """``call_context`` + ``topic_context`` → both rendered, free-text labelled.
+
+    Pins the contract that the legacy ``--context`` flag still works
+    even when the new structured intake path is in use.
+    """
+
+    builder = SectionPromptBuilder()
+    req = GenerationRequest(
+        section_type=SectionType.METHODOLOGY,
+        user_intent="x",
+        call_context="Pasted free-text supplement.",
+        topic_context=_topic_context(),
+    )
+    prompt, _ = builder.build(req, [])
+
+    # Structured context is present.
+    assert "**Topic ID:** 952672" in prompt
+    # Free-text notes appear under the labelled sub-block.
+    assert "**Free-text notes:**" in prompt
+    assert "Pasted free-text supplement." in prompt
+
+
+def test_prompt_falls_back_to_call_context_when_no_topic_context() -> None:
+    """Without ``topic_context`` the legacy free-text rendering is preserved.
+
+    Same behaviour as the pre-issue-#9 build: ``call_context`` is
+    rendered verbatim under ``## Call / topic context`` and there are
+    no labelled sub-blocks.
+    """
+
+    builder = SectionPromptBuilder()
+    req = GenerationRequest(
+        section_type=SectionType.METHODOLOGY,
+        user_intent="x",
+        call_context="Funding call about cyber-physical resilience.",
+    )
+    prompt, _ = builder.build(req, [])
+
+    # Legacy text appears verbatim.
+    assert "Funding call about cyber-physical resilience." in prompt
+    # No structured labels.
+    assert "**Topic ID:**" not in prompt
+    assert "**Free-text notes:**" not in prompt
