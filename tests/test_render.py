@@ -163,9 +163,7 @@ def test_render_funded_and_rejected_render_differently() -> None:
     ]
 
     funded = MarkdownCitationRenderer().render(_make_draft(citations=funded_citations))
-    rejected = MarkdownCitationRenderer().render(
-        _make_draft(citations=rejected_citations)
-    )
+    rejected = MarkdownCitationRenderer().render(_make_draft(citations=rejected_citations))
 
     # 1. Bytes differ at all.
     assert funded != rejected
@@ -337,9 +335,7 @@ def test_render_table_columns_are_consistent() -> None:
     assert len(table_lines) == 7
     # Every line splits into the same number of pipe-segments.
     widths = {len(line.split("|")) for line in table_lines}
-    assert len(widths) == 1, (
-        f"Table column counts diverged: {widths}\n--- Rendered ---\n{rendered}"
-    )
+    assert len(widths) == 1, f"Table column counts diverged: {widths}\n--- Rendered ---\n{rendered}"
 
 
 def test_render_is_deterministic() -> None:

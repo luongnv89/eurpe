@@ -1,0 +1,91 @@
+# Digital Europe Programme drafting profile
+# Covers DEP calls (2021-2027 framework) focused on digital capacity building
+
+programme: digital_europe
+name: Digital Europe Programme
+
+# Programme-specific terminology
+terminology:
+  work_package: Work Package
+  technology_readiness: Maturity Level
+  deliverable: Output
+  milestone: Checkpoint
+  dissemination: Communication and uptake
+  impact_pathway: Results pathway
+  key_performance_indicator: Performance indicator
+
+# Section-specific guidance overrides
+section_guidance:
+  methodology: >-
+    Describe the technical approach and implementation methodology. Focus on:
+    digital technologies and tools to be deployed, integration with existing
+    systems, scalability and interoperability, cybersecurity measures, and
+    validation approach. Emphasize practical deployment over research novelty.
+
+  impact: >-
+    Describe expected impacts on digital capacity, competitiveness, and
+    resilience. Cover: economic benefits (job creation, market growth),
+    societal benefits (digital inclusion, skills development), and strategic
+    autonomy. Quantify impacts where possible and align with DEP objectives.
+
+  implementation: >-
+    Describe the implementation plan with work packages, activities, and
+    timeline. Include resource allocation, governance structure, quality
+    assurance measures, and risk management. Emphasize operational readiness
+    and deployment capacity.
+
+  work_plan: >-
+    Detail the work package structure with activities, timeline, and
+    dependencies. Include a deployment roadmap, checkpoints for progress
+    verification, and outputs with delivery dates. Show how activities build
+    digital capacity incrementally.
+
+  consortium: >-
+    Describe consortium composition and operational capacity. For each partner:
+    explain their role, technical expertise, deployment experience, and
+    contribution to project objectives. Demonstrate capacity to deliver at
+    scale.
+
+  dissemination: >-
+    Plan communication, uptake, and sustainability activities. Cover: target
+    user groups and engagement strategy, training and capacity building,
+    technology transfer and adoption measures, and post-project sustainability
+    plan.
+
+# Expected outputs per section
+expected_outputs:
+  implementation:
+    - Work package structure with activities
+    - Resource allocation plan
+    - Deployment roadmap
+    - Checkpoint list with verification criteria
+    - Output list with delivery dates
+    - Risk register with contingency plans
+    - Governance and coordination structure
+
+  work_plan:
+    - Work package breakdown with activity descriptions
+    - Deployment timeline and roadmap
+    - Checkpoint table
+    - Output table with acceptance criteria
+    - Dependency analysis
+
+  consortium:
+    - Partner roles and capabilities matrix
+    - Deployment capacity assessment
+    - Technical expertise coverage
+
+  dissemination:
+    - Communication plan with target audiences
+    - Training and capacity building programme
+    - Technology adoption strategy
+    - Sustainability and exploitation plan
+
+  impact:
+    - Performance indicator table with targets
+    - Economic impact assessment
+    - Digital capacity building metrics
+    - Alignment with DEP strategic objectives
+
+# Citation framing style
+source_label_style: standard

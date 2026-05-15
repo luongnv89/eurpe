@@ -64,7 +64,7 @@ class EurpeConfig(BaseModel):
             raise ValueError(f"log_level must be one of {sorted(allowed)}, got {value!r}")
         return upper
 
-    def resolve_paths(self, base: Path | None = None) -> "EurpeConfig":
+    def resolve_paths(self, base: Path | None = None) -> EurpeConfig:
         """Return a copy with relative paths resolved against ``base``.
 
         Defaults to the repository root so that running ``eurpe smoke`` from any

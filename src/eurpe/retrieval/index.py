@@ -271,8 +271,7 @@ class ChromaIndex:
             for slot, vec in zip(missing_idx, fresh, strict=True):
                 if len(vec) != expected_dim:
                     raise IndexingError(
-                        f"Embedder produced vector of width {len(vec)}; "
-                        f"expected {expected_dim}."
+                        f"Embedder produced vector of width {len(vec)}; expected {expected_dim}."
                     )
                 chunks[slot].embedding = vec
 

@@ -1,0 +1,106 @@
+# Horizon Europe drafting profile
+# Covers standard Horizon Europe RIA/IA/CSA calls (2021-2027 framework)
+
+programme: horizon_europe
+name: Horizon Europe Standard
+
+# Programme-specific terminology
+terminology:
+  work_package: WP
+  technology_readiness: TRL
+  deliverable: Deliverable
+  milestone: Milestone
+  dissemination: Dissemination and exploitation
+  impact_pathway: Impact pathway
+  key_performance_indicator: KPI
+
+# Section-specific guidance overrides
+# These replace the default SECTION_GUIDANCE for Horizon Europe proposals
+section_guidance:
+  methodology: >-
+    Describe the overall methodology and technical approach. Include: research
+    methods, models and frameworks, datasets and validation strategy, risk
+    mitigation measures, and how the approach addresses the call's specific
+    challenges. Reference TRL progression where applicable.
+
+  impact_pathway: >-
+    Articulate the impact pathway from project outputs to outcomes to wider
+    impacts. Cover scientific, economic, societal, and policy dimensions.
+    Include measurable KPIs and explain how impacts align with the call's
+    expected outcomes and EU policy priorities.
+
+  impact: >-
+    Describe expected impacts across scientific, economic, societal, and policy
+    dimensions. Identify target stakeholders and beneficiaries. Quantify
+    expected benefits where possible and explain alignment with EU strategic
+    priorities and SDGs.
+
+  excellence: >-
+    Demonstrate excellence through: state of the art and research gap analysis,
+    clear research questions and objectives, novelty and ambition of the
+    approach, soundness of methodology, and interdisciplinary integration where
+    relevant.
+
+  implementation: >-
+    Describe the work plan structure with WPs, tasks, milestones, and
+    deliverables. Include effort allocation (person-months per partner per WP),
+    Gantt chart, risk register with mitigation measures, governance structure,
+    and consortium complementarity.
+
+  work_plan: >-
+    Detail the WP structure with objectives, tasks, effort allocation, and
+    interdependencies. Include a Gantt chart showing timeline and critical path.
+    List milestones (verification points) and deliverables (tangible outputs)
+    with clear success criteria.
+
+  consortium: >-
+    Describe consortium composition and complementarity. For each partner:
+    explain their role, relevant expertise, added value, and contribution to
+    project objectives. Demonstrate that the consortium has the necessary
+    competences and no critical gaps.
+
+  dissemination: >-
+    Plan dissemination, exploitation, and communication activities. Cover:
+    target audiences and channels, open science practices (open access, FAIR
+    data), IPR management and exploitation strategy, and measures to maximize
+    impact and uptake.
+
+# Expected outputs per section
+# These are mentioned in the prompt as structural elements the LLM should consider
+expected_outputs:
+  implementation:
+    - WP structure with objectives and tasks
+    - Effort allocation table (person-months per partner per WP)
+    - Gantt chart
+    - Milestone list with verification criteria
+    - Deliverable list with due dates
+    - Risk register with mitigation measures
+    - Governance and decision-making structure
+
+  work_plan:
+    - WP breakdown with task descriptions
+    - Gantt chart showing timeline and dependencies
+    - Milestone table
+    - Deliverable table
+    - Critical path analysis
+
+  consortium:
+    - Partner roles and responsibilities matrix
+    - Complementarity analysis
+    - Competence coverage map
+
+  dissemination:
+    - Dissemination plan with target audiences
+    - Open science and FAIR data strategy
+    - IPR management plan
+    - Exploitation roadmap
+    - Communication activities timeline
+
+  impact_pathway:
+    - Logic model (outputs → outcomes → impacts)
+    - KPI table with baselines and targets
+    - Stakeholder engagement plan
+    - Alignment with EU policy priorities
+
+# Citation framing style
+source_label_style: standard

@@ -224,6 +224,16 @@ class GenerationDraft(BaseModel):
             "traceability. Lets a stored draft be re-run end-to-end."
         ),
     )
+    drafting_profile: str | None = Field(
+        default=None,
+        description=(
+            "Name of the drafting profile used to generate this draft "
+            "(e.g., 'Horizon Europe Standard'). None if no profile was "
+            "applied (default guidance used). Recorded for audit and "
+            "traceability — lets an operator trace which programme-specific "
+            "guidance shaped the draft."
+        ),
+    )
 
     def has_unlabeled_citations(self) -> bool:
         """True iff any citation lacks a ``source_status``.

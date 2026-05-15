@@ -87,9 +87,7 @@ def _load_context(value: str) -> str:
     if value.startswith("@"):
         path = Path(value[1:])
         if not path.exists():
-            raise typer.BadParameter(
-                f"--context points to a file that does not exist: {path}"
-            )
+            raise typer.BadParameter(f"--context points to a file that does not exist: {path}")
         return path.read_text(encoding="utf-8")
     return value
 
@@ -136,17 +134,13 @@ def _print_audit_findings(result: AuditResult) -> None:
 
     typer.echo("Audit findings:", err=True)
     for finding in result.errors:
-        cid_part = (
-            f"[{finding.citation_id}] " if finding.citation_id is not None else ""
-        )
+        cid_part = f"[{finding.citation_id}] " if finding.citation_id is not None else ""
         typer.echo(
             f"  ERROR ({finding.code}): {cid_part}{finding.message}",
             err=True,
         )
     for finding in result.warnings:
-        cid_part = (
-            f"[{finding.citation_id}] " if finding.citation_id is not None else ""
-        )
+        cid_part = f"[{finding.citation_id}] " if finding.citation_id is not None else ""
         typer.echo(
             f"  warning ({finding.code}): {cid_part}{finding.message}",
             err=True,
@@ -159,8 +153,7 @@ def _print_audit_findings(result: AuditResult) -> None:
         )
     else:
         typer.echo(
-            f"Audit: FAILED — {len(result.errors)} error(s), "
-            f"{len(result.warnings)} warning(s).",
+            f"Audit: FAILED — {len(result.errors)} error(s), {len(result.warnings)} warning(s).",
             err=True,
         )
 
@@ -216,10 +209,7 @@ def section(
         ...,
         "--type",
         "-t",
-        help=(
-            f"Section to draft. One of: "
-            f"{', '.join(s.value for s in SectionType)}."
-        ),
+        help=(f"Section to draft. One of: {', '.join(s.value for s in SectionType)}."),
     ),
     intent: str = typer.Option(
         ...,
@@ -240,10 +230,7 @@ def section(
         None,
         "--programme",
         "-p",
-        help=(
-            f"Filter retrieval by programme. One of: "
-            f"{', '.join(p.value for p in Programme)}."
-        ),
+        help=(f"Filter retrieval by programme. One of: {', '.join(p.value for p in Programme)}."),
     ),
     top_k: int = typer.Option(
         5,
@@ -337,8 +324,7 @@ def section(
         section_enum = SectionType(section_type)
     except ValueError as exc:
         typer.echo(
-            f"error: --type must be one of {[s.value for s in SectionType]}, "
-            f"got {section_type!r}",
+            f"error: --type must be one of {[s.value for s in SectionType]}, got {section_type!r}",
             err=True,
         )
         raise typer.Exit(code=1) from exc
@@ -346,8 +332,7 @@ def section(
         programme_enum = Programme(programme) if programme else None
     except ValueError as exc:
         typer.echo(
-            f"error: --programme must be one of {[p.value for p in Programme]}, "
-            f"got {programme!r}",
+            f"error: --programme must be one of {[p.value for p in Programme]}, got {programme!r}",
             err=True,
         )
         raise typer.Exit(code=1) from exc
@@ -355,8 +340,7 @@ def section(
     render_mode = render.lower()
     if render_mode not in {"markdown", "json", "both"}:
         typer.echo(
-            f"error: --render must be one of ['markdown', 'json', 'both'], "
-            f"got {render!r}",
+            f"error: --render must be one of ['markdown', 'json', 'both'], got {render!r}",
             err=True,
         )
         raise typer.Exit(code=1)
@@ -447,11 +431,7 @@ def section(
                 raise typer.Exit(code=1)
 
         for kind, path in target_paths.items():
-            content = (
-                rendered_md
-                if kind == "markdown"
-                else draft.model_dump_json(indent=2)
-            )
+            content = rendered_md if kind == "markdown" else draft.model_dump_json(indent=2)
             _atomic_write(path, content)
             typer.echo("")
             typer.echo(f"  wrote {kind:8s}: {path}")

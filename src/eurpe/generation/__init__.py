@@ -51,6 +51,11 @@ from eurpe.generation.llm import (
     make_llm_client,
 )
 from eurpe.generation.models import CitationRef, GenerationDraft, GenerationRequest
+from eurpe.generation.profiles import (
+    DraftingProfile,
+    list_available_profiles,
+    load_profile,
+)
 from eurpe.generation.prompt import SECTION_GUIDANCE, SectionPromptBuilder
 from eurpe.generation.render import (
     STATUS_BADGE,
@@ -71,6 +76,7 @@ __all__ = [
     "CitationAudit",
     "CitationRef",
     "DeterministicLLMClient",
+    "DraftingProfile",
     "GenerationDraft",
     "GenerationError",
     "GenerationRequest",
@@ -81,5 +87,7 @@ __all__ = [
     "OllamaLLMClient",
     "SectionGenerationWorkflow",
     "SectionPromptBuilder",
+    "list_available_profiles",
+    "load_profile",
     "make_llm_client",
 ]

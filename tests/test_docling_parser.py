@@ -137,19 +137,13 @@ def test_importing_ingestion_does_not_import_docling() -> None:
         [
             sys.executable,
             "-c",
-            (
-                "import sys; "
-                "import eurpe.ingestion; "
-                "print('docling' in sys.modules)"
-            ),
+            ("import sys; import eurpe.ingestion; print('docling' in sys.modules)"),
         ],
         capture_output=True,
         text=True,
         check=False,
     )
-    assert proc.returncode == 0, (
-        f"subprocess failed: stdout={proc.stdout!r} stderr={proc.stderr!r}"
-    )
+    assert proc.returncode == 0, f"subprocess failed: stdout={proc.stdout!r} stderr={proc.stderr!r}"
     # The subprocess prints "True" or "False" for whether ``docling`` was
     # imported as a side effect. We require False — anything else means
     # the lazy-import pattern is broken and ``eurpe smoke`` will slow down.
@@ -335,9 +329,7 @@ def test_cli_refuses_to_overwrite_existing_output(tmp_path: Path) -> None:
     runner = CliRunner()
 
     # First run writes the file successfully.
-    result1 = runner.invoke(
-        app, ["ingest", str(pdf_path), "--output", str(out_dir)]
-    )
+    result1 = runner.invoke(app, ["ingest", str(pdf_path), "--output", str(out_dir)])
     assert result1.exit_code == 0, result1.output
     out_file = out_dir / "synthetic-overwrite.parsed.json"
     assert out_file.exists()
@@ -345,9 +337,7 @@ def test_cli_refuses_to_overwrite_existing_output(tmp_path: Path) -> None:
 
     # Second run must refuse — the existing file would otherwise be
     # silently clobbered.
-    result2 = runner.invoke(
-        app, ["ingest", str(pdf_path), "--output", str(out_dir)]
-    )
+    result2 = runner.invoke(app, ["ingest", str(pdf_path), "--output", str(out_dir)])
     assert result2.exit_code == 1, result2.output
     assert "already exists" in result2.output.lower()
     # The on-disk bytes must be unchanged (no half-written .tmp left

@@ -37,18 +37,30 @@ Acceptance criteria covered
   and the workflow exercises no other external endpoints. The
   ``test_offline_end_to_end_under_no_network_fixture`` test pins
   this end-to-end.
+
+Drafting profiles (Task 2.1)
+-----------------------------
+The workflow optionally accepts a
+:class:`~eurpe.generation.profiles.DraftingProfile` to apply
+programme-specific guidance. When a profile is provided, the workflow
+records its name in the :class:`GenerationDraft` for audit and
+traceability.
 """
 
 from __future__ import annotations
 
 import logging
 import re
+from typing import TYPE_CHECKING
 
 from eurpe.generation.errors import GenerationError
 from eurpe.generation.llm import LLMClient
 from eurpe.generation.models import CitationRef, GenerationDraft, GenerationRequest
 from eurpe.generation.prompt import SectionPromptBuilder
 from eurpe.retrieval import RetrievalResult, SourceStatusAwareRetriever
+
+if TYPE_CHECKING:
+    from eurpe.generation.profiles import DraftingProfile
 
 logger = logging.getLogger(__name__)
 
@@ -121,7 +133,12 @@ class SectionGenerationWorkflow:
 
         return self._retriever
 
-    def run(self, request: GenerationRequest) -> GenerationDraft:
+    def run(
+        self,
+        request: GenerationRequest,
+        *,
+        profile: DraftingProfile | None = None,
+    ) -> GenerationDraft:
         """Drive the full pipeline for one request and return a :class:`GenerationDraft`.
 
         Steps (each implemented as a private method so the LangGraph
@@ -139,6 +156,10 @@ class SectionGenerationWorkflow:
            hallucinated markers.
         5. Assemble a :class:`GenerationDraft` and return it.
 
+        If ``profile`` is provided, programme-specific section guidance
+        and expected outputs are used. The profile name is recorded in
+        the draft for audit and traceability.
+
         Errors:
 
         * :class:`GenerationError` (base) — anything that goes wrong
@@ -149,7 +170,7 @@ class SectionGenerationWorkflow:
         """
 
         results = self._retrieve(request)
-        prompt, citations = self._build_prompt(request, results)
+        prompt, citations = self._build_prompt(request, results, profile=profile)
         text = self._generate(prompt)
         self._validate_citations(text=text, citations=citations)
         return GenerationDraft(
@@ -159,6 +180,7 @@ class SectionGenerationWorkflow:
             prompt_used=prompt,
             model=self._llm.model,
             request=request,
+            drafting_profile=profile.name if profile is not None else None,
         )
 
     # ------------------------------------------------------------------
@@ -189,10 +211,15 @@ class SectionGenerationWorkflow:
         self,
         request: GenerationRequest,
         results: list[RetrievalResult],
+        *,
+        profile: DraftingProfile | None = None,
     ) -> tuple[str, list[CitationRef]]:
-        """Delegate to the configured :class:`SectionPromptBuilder`."""
+        """Delegate to the configured :class:`SectionPromptBuilder`.
 
-        return self._prompt_builder.build(request, results)
+        If ``profile`` is provided, programme-specific guidance is used.
+        """
+
+        return self._prompt_builder.build(request, results, profile=profile)
 
     def _generate(self, prompt: str) -> str:
         """Call the configured LLM with the built prompt.

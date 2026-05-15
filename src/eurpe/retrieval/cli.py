@@ -75,9 +75,7 @@ def _resolve_pdf_path(metadata_yaml: Path, source_path: str) -> Path:
 def _load_proposal_metadata(metadata_yaml: Path) -> ProposalMetadata:
     raw = yaml.safe_load(metadata_yaml.read_text(encoding="utf-8"))
     if not isinstance(raw, dict):
-        raise typer.BadParameter(
-            f"{metadata_yaml}: expected a YAML mapping at the document root"
-        )
+        raise typer.BadParameter(f"{metadata_yaml}: expected a YAML mapping at the document root")
     # The metadata YAMLs we accept here are *proposal-shaped*, not
     # *chunk-shaped* — chunk YAMLs nest a ``proposal`` key. Accept
     # both: if ``proposal`` is present, use that subkey; otherwise
@@ -95,9 +93,7 @@ def _format_snippet(text: str, *, max_chars: int = 200) -> str:
     return flat[: max_chars - 1] + "…"
 
 
-def _print_query_results(
-    results: Iterable[tuple[Chunk, float]], *, max_chars: int = 200
-) -> None:
+def _print_query_results(results: Iterable[tuple[Chunk, float]], *, max_chars: int = 200) -> None:
     """Legacy formatter for raw ``(chunk, score)`` tuples.
 
     Kept around for any callers that still consume ``ChromaIndex.query``
@@ -123,9 +119,7 @@ def _print_query_results(
         typer.echo(f"     {_format_snippet(chunk.text, max_chars=max_chars)}")
 
 
-def _print_retrieval_results(
-    results: Iterable[RetrievalResult], *, max_chars: int = 200
-) -> None:
+def _print_retrieval_results(results: Iterable[RetrievalResult], *, max_chars: int = 200) -> None:
     """Print results returned by :class:`SourceStatusAwareRetriever`.
 
     Adds a ``policy_reason=`` column so an operator can immediately tell
@@ -183,9 +177,7 @@ def build(
     ensure_runtime_dirs(cfg)
 
     embedder = make_embedder(cfg)
-    typer.echo(
-        f"Using embedder: {embedder.model_name} (dim={embedder.dimension})"
-    )
+    typer.echo(f"Using embedder: {embedder.model_name} (dim={embedder.dimension})")
 
     parser = DoclingProposalParser(offline=cfg.offline_mode)
     chunker = HierarchicalChunker()
@@ -222,9 +214,7 @@ def build(
             raise typer.Exit(code=1) from exc
 
         total_added += len(chunks)
-        typer.echo(
-            f"  ingested {yaml_path.name}: {len(chunks)} chunks from {pdf_path.name}"
-        )
+        typer.echo(f"  ingested {yaml_path.name}: {len(chunks)} chunks from {pdf_path.name}")
 
     typer.echo("")
     typer.echo(
@@ -346,8 +336,7 @@ def query(
         programme_enum = Programme(programme) if programme else None
     except ValueError as exc:
         typer.echo(
-            f"error: --programme must be one of "
-            f"{[p.value for p in Programme]}, got {programme!r}",
+            f"error: --programme must be one of {[p.value for p in Programme]}, got {programme!r}",
             err=True,
         )
         raise typer.Exit(code=1) from exc

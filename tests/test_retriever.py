@@ -327,9 +327,9 @@ def test_lessons_learned_relaxes_rejected_threshold_same_chunk_crosses() -> None
     stub = _StubIndex(rows)
 
     # Default policy — the borderline rejected MUST be excluded.
-    default_results = SourceStatusAwareRetriever(
-        stub, policy=RetrievalPolicy()
-    ).retrieve("query", top_k=5)
+    default_results = SourceStatusAwareRetriever(stub, policy=RetrievalPolicy()).retrieve(
+        "query", top_k=5
+    )
     rejected_default = [r for r in default_results if r.source_status is SourceStatus.REJECTED]
     assert rejected_default == [], (
         "Borderline rejected chunk should be excluded under default policy "
@@ -342,9 +342,9 @@ def test_lessons_learned_relaxes_rejected_threshold_same_chunk_crosses() -> None
         lessons_learned_mode=True,
         rejected_threshold_offset=-0.10,
     )
-    lessons_results = SourceStatusAwareRetriever(
-        stub, policy=lessons_policy
-    ).retrieve("query", top_k=5)
+    lessons_results = SourceStatusAwareRetriever(stub, policy=lessons_policy).retrieve(
+        "query", top_k=5
+    )
     rejected_lessons = [r for r in lessons_results if r.source_status is SourceStatus.REJECTED]
     assert len(rejected_lessons) == 1, (
         "Borderline rejected chunk should now be included under lessons-learned "
@@ -560,9 +560,7 @@ def test_section_type_filter_empty_pool_falls_back_to_unfiltered() -> None:
     assert len(fallback_results) == 1
     assert fallback_results[0].chunk is impact_funded
     # Policy reason carries the fallback suffix so audits can trace it.
-    assert fallback_results[0].policy_reason.endswith(
-        POLICY_REASON_SECTION_TYPE_FALLBACK_SUFFIX
-    )
+    assert fallback_results[0].policy_reason.endswith(POLICY_REASON_SECTION_TYPE_FALLBACK_SUFFIX)
     # The underlying status reason still leads the string.
     assert fallback_results[0].policy_reason.startswith(POLICY_REASON_FUNDED)
     # Two index calls were made: the first with the section_type clause,
@@ -578,9 +576,7 @@ def test_section_type_fallback_does_not_fire_when_pool_nonempty() -> None:
     rows = [(_funded(), 0.9)]  # _funded() defaults to methodology
     stub = _StubIndex(rows)
     retriever = SourceStatusAwareRetriever(stub)
-    results = retriever.retrieve(
-        "query", top_k=5, section_type=SectionType.METHODOLOGY
-    )
+    results = retriever.retrieve("query", top_k=5, section_type=SectionType.METHODOLOGY)
 
     # Exactly one index call — no fallback.
     assert len(stub.calls) == 1
@@ -631,9 +627,7 @@ def test_section_type_fallback_disabled_in_policy() -> None:
         ),
     )
 
-    results = retriever.retrieve(
-        "query", top_k=5, section_type=SectionType.METHODOLOGY
-    )
+    results = retriever.retrieve("query", top_k=5, section_type=SectionType.METHODOLOGY)
 
     assert results == []
     assert len(stub.calls) == 1
@@ -671,9 +665,7 @@ def test_section_type_fallback_per_call_kwarg_overrides_policy() -> None:
 
     assert len(results) == 1
     assert results[0].chunk is impact_chunk
-    assert results[0].policy_reason.endswith(
-        POLICY_REASON_SECTION_TYPE_FALLBACK_SUFFIX
-    )
+    assert results[0].policy_reason.endswith(POLICY_REASON_SECTION_TYPE_FALLBACK_SUFFIX)
     assert len(stub.calls) == 2
 
 
@@ -718,10 +710,7 @@ def test_section_type_fallback_preserves_programme_filter() -> None:
 
 
 def test_funded_only_corpus_returns_only_funded() -> None:
-    rows = [
-        (_funded(idx=i, doc=f"f{i}"), 0.95 - i * 0.01)
-        for i in range(5)
-    ]
+    rows = [(_funded(idx=i, doc=f"f{i}"), 0.95 - i * 0.01) for i in range(5)]
     retriever = SourceStatusAwareRetriever(_StubIndex(rows))
     results = retriever.retrieve("query", top_k=3)
 
@@ -732,10 +721,7 @@ def test_funded_only_corpus_returns_only_funded() -> None:
 def test_rejected_only_corpus_capped_by_default() -> None:
     """With only-rejected corpus and the 40% default cap, ≤4 rejected at top_k=10."""
 
-    rows = [
-        (_rejected(idx=i, doc=f"r{i}"), 0.95 - i * 0.01)
-        for i in range(10)
-    ]
+    rows = [(_rejected(idx=i, doc=f"r{i}"), 0.95 - i * 0.01) for i in range(10)]
     retriever = SourceStatusAwareRetriever(_StubIndex(rows))
     results = retriever.retrieve("query", top_k=10)
 
@@ -747,10 +733,7 @@ def test_rejected_only_corpus_capped_by_default() -> None:
 def test_rejected_only_corpus_under_lessons_learned_returns_more() -> None:
     """Lessons-learned mode bypasses the cap; more rejected results come back."""
 
-    rows = [
-        (_rejected(idx=i, doc=f"r{i}"), 0.95 - i * 0.01)
-        for i in range(10)
-    ]
+    rows = [(_rejected(idx=i, doc=f"r{i}"), 0.95 - i * 0.01) for i in range(10)]
     policy = RetrievalPolicy(lessons_learned_mode=True)
     retriever = SourceStatusAwareRetriever(_StubIndex(rows), policy=policy)
     results = retriever.retrieve("query", top_k=10)
@@ -781,11 +764,13 @@ def test_mixed_corpus_returns_blend_with_funded_priority() -> None:
     # Funded leads at near-tied scores: the score-0.85 funded chunk
     # outranks the score-0.85 rejected chunk.
     funded_85_rank = next(
-        r.rank for r in results
+        r.rank
+        for r in results
         if r.source_status is SourceStatus.FUNDED and r.score == pytest.approx(0.85)
     )
     rejected_85_rank = next(
-        r.rank for r in results
+        r.rank
+        for r in results
         if r.source_status is SourceStatus.REJECTED and r.score == pytest.approx(0.85)
     )
     assert funded_85_rank < rejected_85_rank
@@ -826,10 +811,7 @@ def test_results_carry_chunk_metadata_source_status_label_intact() -> None:
 
 
 def test_top_k_respected() -> None:
-    rows = [
-        (_funded(idx=i, doc=f"f{i}"), 0.95 - i * 0.01)
-        for i in range(10)
-    ]
+    rows = [(_funded(idx=i, doc=f"f{i}"), 0.95 - i * 0.01) for i in range(10)]
     retriever = SourceStatusAwareRetriever(_StubIndex(rows))
     results = retriever.retrieve("query", top_k=3)
 
@@ -959,9 +941,7 @@ def test_integration_label_survives_chroma_round_trip(tmp_path) -> None:  # type
     policy = RetrievalPolicy(relevance_threshold=0.0, max_rejected_fraction=1.0)
     retriever = SourceStatusAwareRetriever(index, policy=policy)
 
-    results = retriever.retrieve(
-        query_text_for("funded_horizon_europe.yaml"), top_k=5
-    )
+    results = retriever.retrieve(query_text_for("funded_horizon_europe.yaml"), top_k=5)
     assert results, "expected at least one result"
     for r in results:
         assert r.chunk.metadata.source_status is r.chunk.metadata.proposal.outcome
@@ -975,9 +955,7 @@ def test_integration_marker_query_lands_funded_at_rank_1(tmp_path) -> None:  # t
     policy = RetrievalPolicy(relevance_threshold=0.0, max_rejected_fraction=1.0)
     retriever = SourceStatusAwareRetriever(index, policy=policy)
 
-    results = retriever.retrieve(
-        query_text_for("funded_horizon_europe.yaml"), top_k=4
-    )
+    results = retriever.retrieve(query_text_for("funded_horizon_europe.yaml"), top_k=4)
     assert results[0].source_status is SourceStatus.FUNDED
     assert results[0].rank == 1
     assert results[0].policy_reason == POLICY_REASON_FUNDED
@@ -1011,9 +989,7 @@ def test_integration_offline_no_network(tmp_path, no_network: None) -> None:  # 
     policy = RetrievalPolicy(relevance_threshold=0.0, max_rejected_fraction=1.0)
     retriever = SourceStatusAwareRetriever(index, policy=policy)
 
-    results = retriever.retrieve(
-        query_text_for("funded_horizon_europe.yaml"), top_k=2
-    )
+    results = retriever.retrieve(query_text_for("funded_horizon_europe.yaml"), top_k=2)
     assert results
     assert results[0].source_status is SourceStatus.FUNDED
 
@@ -1057,6 +1033,4 @@ def test_integration_section_type_fallback_against_chroma(tmp_path) -> None:  # 
     # rank 1, not any of the other three fixtures that happened to score.
     assert "funded_horizon_europe-marker" in fallback_results[0].chunk.text
     assert fallback_results[0].source_status is SourceStatus.FUNDED
-    assert fallback_results[0].policy_reason.endswith(
-        POLICY_REASON_SECTION_TYPE_FALLBACK_SUFFIX
-    )
+    assert fallback_results[0].policy_reason.endswith(POLICY_REASON_SECTION_TYPE_FALLBACK_SUFFIX)

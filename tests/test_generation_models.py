@@ -149,12 +149,8 @@ def test_generation_request_top_k_bounds_enforced() -> None:
             top_k_examples=21,
         )
     # Boundaries are accepted.
-    GenerationRequest(
-        section_type=SectionType.METHODOLOGY, user_intent="x", top_k_examples=1
-    )
-    GenerationRequest(
-        section_type=SectionType.METHODOLOGY, user_intent="x", top_k_examples=20
-    )
+    GenerationRequest(section_type=SectionType.METHODOLOGY, user_intent="x", top_k_examples=1)
+    GenerationRequest(section_type=SectionType.METHODOLOGY, user_intent="x", top_k_examples=20)
 
 
 def test_generation_request_accepts_target_programme() -> None:
@@ -200,9 +196,7 @@ def test_generation_draft_extra_field_forbidden() -> None:
             citations=[],
             prompt_used="p",
             model="m",
-            request=GenerationRequest(
-                section_type=SectionType.METHODOLOGY, user_intent="x"
-            ),
+            request=GenerationRequest(section_type=SectionType.METHODOLOGY, user_intent="x"),
             unexpected="boom",
         )
 
@@ -215,9 +209,7 @@ def test_generation_draft_text_must_be_non_empty() -> None:
             citations=[],
             prompt_used="p",
             model="m",
-            request=GenerationRequest(
-                section_type=SectionType.METHODOLOGY, user_intent="x"
-            ),
+            request=GenerationRequest(section_type=SectionType.METHODOLOGY, user_intent="x"),
         )
 
 
