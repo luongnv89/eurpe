@@ -29,6 +29,9 @@ dependencies = [
     "pyyaml>=6.0",
     "fastapi>=0.110",
     "uvicorn[standard]>=0.27",
+    # python-multipart powers FastAPI ``UploadFile`` form parsing used by
+    # ``POST /api/ingestion/parse``. FastAPI does not pull it transitively.
+    "python-multipart>=0.0.9",
     "typer>=0.12",
     # Docling is the proposal PDF parser (see eurpe.ingestion). Pinned to
     # the 2.x line; let the venv resolve the exact compatible torch /
