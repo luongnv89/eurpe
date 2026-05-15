@@ -119,6 +119,31 @@ to the PDF; if absent, the suite synthesises sensible defaults
 (`programme: horizon_europe`, `outcome: funded`, `proposal_title:
 <stem>`).
 
+**Running E2E against a real LLM (Ollama).** By default the E2E suite
+uses a deterministic offline stub for the generation step so CI works
+on a fresh checkout without Ollama installed. The stub emits clearly
+labelled placeholder text — fine for structural assertions, but
+unsuitable for evaluating real-proposal quality. To require a real
+local LLM, start Ollama and set `EURPE_E2E_REQUIRE_LLM=1`:
+
+```bash
+# One-time setup.
+ollama serve &
+ollama pull llama3.1:8b   # or whichever model your config.yaml names
+
+# Run the suite with the real-LLM gate enabled.
+EURPE_E2E_REQUIRE_LLM=1 make e2e
+# Or via the convenience target:
+make e2e-real
+```
+
+When `EURPE_E2E_REQUIRE_LLM=1` is set and the deterministic stub is
+hit (because Ollama is unreachable, the model is missing, or
+`models.ollama_base_url` in `config.yaml` is wrong), the affected
+case fails with a message naming the env var and the next steps. When
+the env var is unset, the suite continues to accept the stub — that
+preserves the CI-on-fresh-checkout contract.
+
 **CI policy.** `.github/workflows/e2e.yml` runs the slow tier on every
 push to `main`, nightly at 03:00 UTC, and on manual dispatch. All
 other workflows should use `pytest -m 'not e2e'` so they stay

@@ -41,6 +41,7 @@ pytest.importorskip(
 
 from tests._helpers.offline import write_offline_config  # noqa: E402
 from tests._helpers.pipeline import run_full_pipeline  # noqa: E402
+from tests._helpers.require_llm import assert_real_llm_was_used  # noqa: E402
 from tests.e2e.conftest import discover_proposals  # noqa: E402
 
 # Compute the parametrise list at module-load time. The conftest will
@@ -141,6 +142,13 @@ def test_full_pipeline(pdf_path: Path, tmp_path: Path) -> None:
     assert payload["section_type"] == "methodology", (
         f"unexpected section_type in {json_path}: {payload.get('section_type')!r}"
     )
+
+    # Issue #48 — when EURPE_E2E_REQUIRE_LLM=1, fail loudly if the
+    # offline stub produced the draft (the GenerationDraft already
+    # records the model that wrote each section). The gate body lives
+    # in tests._helpers.require_llm so the fast-tier unit tests in
+    # tests/test_e2e_require_llm.py exercise the exact same code path.
+    assert_real_llm_was_used(payload)
 
     # AC4 — citations / audit output produced. The explicit ``audit``
     # subcommand re-checks the saved draft and writes audit.json. The

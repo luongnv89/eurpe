@@ -8,7 +8,7 @@
 # the inner-loop dev cycle stays fast; ``make test-all`` is the catch-all
 # that runs both tiers.
 
-.PHONY: e2e e2e-fixtures-only test test-all
+.PHONY: e2e e2e-fixtures-only e2e-real test test-all
 
 # Run the full E2E suite. Picks up every PDF in tests/e2e/fixtures/ and
 # proposals/ (the latter is gitignored — present only on a dev machine).
@@ -20,6 +20,13 @@ e2e:
 # PDF is available.
 e2e-fixtures-only:
 	pytest tests/e2e/ -m e2e -v -k "sample_proposal"
+
+# E2E suite that requires a real LLM (Ollama). Sets EURPE_E2E_REQUIRE_LLM=1
+# so the suite fails loudly if the deterministic stub is hit instead of a
+# real model — see issue #48 and README §Tests. Requires `ollama serve`
+# and the configured model (default llama3.1:8b) to be pulled.
+e2e-real:
+	EURPE_E2E_REQUIRE_LLM=1 pytest tests/e2e/ -m e2e -v
 
 # Fast tests only. Skips the e2e marker AND the docling marker (the
 # latter is also slow, since it parses synthetic PDFs through Docling).
