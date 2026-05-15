@@ -131,6 +131,18 @@ def test_extract_text_empty_input_yields_empty_context() -> None:
     assert ctx.section_guidance == {}
 
 
+def test_extract_text_does_not_use_topic_id_as_title() -> None:
+    """A bare ``Topic: <digits>`` line must not leak the ID into topic_title.
+
+    Without this guard the prompt would render ``**Topic title:** 952672``
+    and the LLM would treat the numeric ID as the human-readable title.
+    """
+
+    ctx = extract_topic_context_from_text("Topic: 952672\nExpected Outcomes:\n- foo\n")
+    assert ctx.topic_id == "952672"
+    assert ctx.topic_title is None
+
+
 def test_extract_text_outcomes_with_no_bullets_split_on_blank_lines() -> None:
     """A heading block with no bullet markers splits paragraphs."""
 

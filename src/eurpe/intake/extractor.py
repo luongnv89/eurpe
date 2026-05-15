@@ -357,6 +357,13 @@ def extract_topic_context_from_text(
     programme, call_id, topic_id = _parse_programme_call_topic(normalised)
 
     topic_title = _extract_labelled_line(normalised, ("Topic title", "Topic"))
+    # A bare ``Topic: <id>`` line otherwise leaks the numeric topic ID into
+    # topic_title — the prompt would then render ``**Topic title:** 952672``
+    # and the LLM would treat the ID string as the topic name.
+    if topic_title is not None and (
+        topic_title == topic_id or re.fullmatch(r"\d{6,7}", topic_title)
+    ):
+        topic_title = None
 
     outcomes_block = _extract_block_after_heading(normalised, "Expected Outcomes")
     expected_outcomes = _split_bullets(outcomes_block) if outcomes_block else []
