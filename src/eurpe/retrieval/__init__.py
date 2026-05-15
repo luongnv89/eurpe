@@ -36,6 +36,7 @@ from eurpe.retrieval.errors import (
 )
 from eurpe.retrieval.index import ChromaIndex
 from eurpe.retrieval.models import Chunk
+from eurpe.retrieval.pipeline import index_proposal
 from eurpe.retrieval.retriever import (
     RetrievalPolicy,
     RetrievalResult,
@@ -55,6 +56,7 @@ __all__ = [
     "RetrievalPolicy",
     "RetrievalResult",
     "SourceStatusAwareRetriever",
+    "index_proposal",
     "infer_section_type",
     "make_embedder",
 ]
