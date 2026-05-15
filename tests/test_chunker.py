@@ -60,9 +60,7 @@ from eurpe.schema import (
         ("", SectionType.OTHER),
     ],
 )
-def test_infer_section_type_recognises_common_patterns(
-    heading: str, expected: SectionType
-) -> None:
+def test_infer_section_type_recognises_common_patterns(heading: str, expected: SectionType) -> None:
     assert infer_section_type(heading) is expected
 
 
@@ -187,10 +185,7 @@ def test_chunker_emits_overlap_between_consecutive_chunks() -> None:
         next_text = chunks[i + 1].text
         # ``in`` on the next chunk's first ~half catches the overlap
         # (the splitter shifts by at most one boundary token).
-        assert (
-            prev_tail[:30].strip() in next_text
-            or prev_tail[20:].strip() in next_text
-        )
+        assert prev_tail[:30].strip() in next_text or prev_tail[20:].strip() in next_text
 
 
 def test_chunker_min_chunk_chars_merges_tail_into_predecessor() -> None:
@@ -237,9 +232,7 @@ def test_chunker_propagates_esr_status_to_every_chunk() -> None:
 
 
 def test_chunker_chunk_index_is_monotonic_across_sections() -> None:
-    sections = [
-        ParsedSection(heading=f"Section {i}", level=1, text="body " * 20) for i in range(5)
-    ]
+    sections = [ParsedSection(heading=f"Section {i}", level=1, text="body " * 20) for i in range(5)]
     parsed = _parsed(sections)
     chunker = HierarchicalChunker(target_chars=400, overlap_chars=50, min_chunk_chars=20)
     chunks = chunker.chunk(parsed, _proposal())

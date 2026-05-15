@@ -174,15 +174,7 @@ class MarkdownCitationRenderer:
         body = draft.text.rstrip()
         references_block = self._render_references(draft.citations)
 
-        return (
-            f"# {section_title}\n"
-            "\n"
-            f"{body}\n"
-            "\n"
-            "## References\n"
-            "\n"
-            f"{references_block}\n"
-        )
+        return f"# {section_title}\n\n{body}\n\n## References\n\n{references_block}\n"
 
     # ------------------------------------------------------------------
     # internal helpers — small, named, testable indirectly via render()

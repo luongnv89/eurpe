@@ -166,9 +166,7 @@ class RetrievalResult(BaseModel):
     score: float = Field(
         ge=-1.0,
         le=1.0,
-        description=(
-            "Cosine similarity from the index, in [-1, 1]. Higher is better."
-        ),
+        description=("Cosine similarity from the index, in [-1, 1]. Higher is better."),
     )
     rank: int = Field(
         ge=1,
@@ -447,20 +445,13 @@ class SourceStatusAwareRetriever:
         # clause — programme stays put because it represents the call's
         # topical scope, which the user did NOT relax.
         section_type_fallback_active = False
-        if (
-            fallback_enabled
-            and section_type is not None
-            and source_status is None
-            and not raw
-        ):
+        if fallback_enabled and section_type is not None and source_status is None and not raw:
             fallback_where = self._build_where_clause(
                 programme=programme,
                 section_type=None,
                 source_status=None,
             )
-            fallback_raw = self._index.query(
-                query, top_k=candidate_k, where=fallback_where
-            )
+            fallback_raw = self._index.query(query, top_k=candidate_k, where=fallback_where)
             if fallback_raw:
                 logger.warning(
                     "section_type=%s filter returned 0 candidates; falling back "

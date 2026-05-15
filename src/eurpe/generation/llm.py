@@ -168,9 +168,7 @@ class OllamaLLMClient:
         except httpx.HTTPError as exc:
             # Other transport problems (proxy, malformed URL) — protocol-
             # level rather than reachability — get the generic error.
-            raise GenerationError(
-                f"Ollama request to {url} failed: {exc}"
-            ) from exc
+            raise GenerationError(f"Ollama request to {url} failed: {exc}") from exc
 
         if resp.status_code >= 400:
             # Truncate the body in the error message so a giant 500
@@ -178,23 +176,20 @@ class OllamaLLMClient:
             # the key / value pair Ollama complained about.
             body_preview = resp.text[:500]
             raise GenerationError(
-                f"Ollama returned HTTP {resp.status_code} for model "
-                f"{self._model!r}: {body_preview}"
+                f"Ollama returned HTTP {resp.status_code} for model {self._model!r}: {body_preview}"
             )
 
         try:
             payload = resp.json()
         except ValueError as exc:
             raise GenerationError(
-                f"Ollama returned non-JSON body for model {self._model!r}: "
-                f"{resp.text[:500]}"
+                f"Ollama returned non-JSON body for model {self._model!r}: {resp.text[:500]}"
             ) from exc
 
         completion = payload.get("response")
         if not isinstance(completion, str) or not completion:
             raise GenerationError(
-                f"Ollama returned a malformed payload for model {self._model!r}: "
-                f"{payload!r}"
+                f"Ollama returned a malformed payload for model {self._model!r}: {payload!r}"
             )
         return completion
 
@@ -286,13 +281,10 @@ class DeterministicLLMClient:
         # makes the citation-validation logic in the workflow easy to
         # exercise. The phrasing is deliberately neutral; this is a
         # stub, not a real drafter.
-        sentences = [
-            f"Draft for the {section_title} section, derived from retrieved evidence."
-        ]
+        sentences = [f"Draft for the {section_title} section, derived from retrieved evidence."]
         for n in markers:
             sentences.append(
-                f"This sentence references retrieved example [{n}] "
-                f"as supporting evidence."
+                f"This sentence references retrieved example [{n}] as supporting evidence."
             )
         return " ".join(sentences)
 

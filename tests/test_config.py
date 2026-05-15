@@ -13,7 +13,6 @@ import yaml
 
 from eurpe.config import EXAMPLE_CONFIG_PATH, EurpeConfig, load_config
 
-
 REQUIRED_TOP_LEVEL_KEYS = {
     "corpus_path",
     "index_path",
@@ -31,9 +30,7 @@ REQUIRED_MODEL_KEYS = {
 
 
 def test_example_config_file_exists() -> None:
-    assert EXAMPLE_CONFIG_PATH.exists(), (
-        f"Expected example config at {EXAMPLE_CONFIG_PATH}"
-    )
+    assert EXAMPLE_CONFIG_PATH.exists(), f"Expected example config at {EXAMPLE_CONFIG_PATH}"
 
 
 def test_example_config_has_required_keys() -> None:

@@ -214,8 +214,9 @@ def test_index_upsert_is_idempotent_on_chunk_id(tmp_path: Path) -> None:
 
 def test_index_query_with_status_filter_only_returns_matching(tmp_path: Path) -> None:
     index, _chunks = _build_index_with_fixtures(tmp_path)
-    results = index.query("query that mentions excellence and impact", top_k=10,
-                          where={"source_status": "funded"})
+    results = index.query(
+        "query that mentions excellence and impact", top_k=10, where={"source_status": "funded"}
+    )
     assert results, "expected at least one funded chunk"
     for chunk, _score in results:
         assert chunk.metadata.source_status is SourceStatus.FUNDED

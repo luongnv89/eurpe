@@ -125,8 +125,7 @@ def load_profile(programme: Programme, profiles_dir: Path = _PROFILES_DIR) -> Dr
 
     if not isinstance(raw, dict):
         raise ValueError(
-            f"Profile file {profile_path} must contain a YAML mapping, "
-            f"got {type(raw).__name__}."
+            f"Profile file {profile_path} must contain a YAML mapping, got {type(raw).__name__}."
         )
 
     # Pydantic will validate the structure and coerce enum strings.

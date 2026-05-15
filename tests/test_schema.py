@@ -61,9 +61,7 @@ def _valid_anchor() -> CitationAnchor:
 def test_fixture_directory_has_one_file_per_source_status() -> None:
     """The PRD requires fixture coverage for every ``SourceStatus`` value."""
 
-    assert len(FIXTURE_FILES) == 4, (
-        f"Expected 4 fixtures, found {[f.name for f in FIXTURE_FILES]}"
-    )
+    assert len(FIXTURE_FILES) == 4, f"Expected 4 fixtures, found {[f.name for f in FIXTURE_FILES]}"
     statuses_in_files = set()
     for path in FIXTURE_FILES:
         raw = yaml.safe_load(path.read_text(encoding="utf-8"))

@@ -36,9 +36,7 @@ def no_network(monkeypatch: pytest.MonkeyPatch) -> None:
     """Fail the test the moment any code tries to open a TCP connection."""
 
     def _blocked(*args: Any, **kwargs: Any) -> None:  # pragma: no cover - intentional
-        raise pytest.fail.Exception(
-            "Network access attempted during a test marked offline-only."
-        )
+        raise pytest.fail.Exception("Network access attempted during a test marked offline-only.")
 
     monkeypatch.setattr(socket.socket, "connect", _blocked)
     monkeypatch.setattr(socket.socket, "connect_ex", _blocked)

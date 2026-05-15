@@ -190,8 +190,7 @@ def test_run_with_impact_pathway_section_type(tmp_path) -> None:  # type: ignore
         document_id="impact_funded",
         section_type=SectionType.IMPACT_PATHWAY,
         text=(
-            "Impact pathway chunk: outputs to outcomes to wider impacts "
-            "in cyber-physical systems."
+            "Impact pathway chunk: outputs to outcomes to wider impacts in cyber-physical systems."
         ),
     )
     index.upsert([impact_chunk])
@@ -309,8 +308,7 @@ def test_run_with_lessons_learned_propagates_to_retriever(tmp_path) -> None:  # 
     # The corpus has 2 rejected chunks; under lessons_learned mode at
     # least one should appear in the citations.
     assert SourceStatus.REJECTED in statuses, (
-        f"Expected at least one rejected citation under lessons_learned=True; "
-        f"got {statuses}"
+        f"Expected at least one rejected citation under lessons_learned=True; got {statuses}"
     )
 
 

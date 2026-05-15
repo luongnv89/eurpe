@@ -263,7 +263,7 @@ def test_prompt_omits_expected_outputs_when_profile_has_none(
         user_intent="Describe something",
         target_programme=Programme.HORIZON_EUROPE,
     )
-    draft = deterministic_workflow.run(request, profile=profile)
+    deterministic_workflow.run(request, profile=profile)
 
     # OTHER section has no expected outputs, so the section should not appear.
     expected = profile.get_expected_outputs(SectionType.OTHER)

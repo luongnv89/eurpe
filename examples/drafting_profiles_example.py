@@ -5,11 +5,9 @@ programme-specific proposal sections.
 """
 
 from eurpe.generation import (
-    DraftingProfile,
     GenerationRequest,
-    SectionGenerationWorkflow,
-    load_profile,
     list_available_profiles,
+    load_profile,
 )
 from eurpe.schema import Programme, SectionType
 
@@ -30,12 +28,12 @@ for key, value in he_profile.terminology.items():
 
 # Check section guidance
 methodology_guidance = he_profile.get_section_guidance(SectionType.METHODOLOGY)
-print(f"\nMethodology guidance (first 100 chars):")
+print("\nMethodology guidance (first 100 chars):")
 print(f"  {methodology_guidance[:100]}..." if methodology_guidance else "  (none)")
 
 # Check expected outputs
 impl_outputs = he_profile.get_expected_outputs(SectionType.IMPLEMENTATION)
-print(f"\nImplementation expected outputs:")
+print("\nImplementation expected outputs:")
 for output in impl_outputs[:3]:  # Show first 3
     print(f"  - {output}")
 

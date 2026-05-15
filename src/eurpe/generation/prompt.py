@@ -38,8 +38,9 @@ contract.
 from __future__ import annotations
 
 from eurpe.generation.models import CitationRef, GenerationRequest
+from eurpe.generation.profiles import DraftingProfile
 from eurpe.retrieval import RetrievalResult
-from eurpe.schema import Programme, SectionType, SourceStatus
+from eurpe.schema import SectionType, SourceStatus
 
 #: Cap on the snippet length included in the prompt's evidence list and in the
 #: :class:`CitationRef.snippet` field. 300 chars is enough to convey the gist
@@ -95,9 +96,7 @@ SECTION_GUIDANCE: dict[SectionType, str] = {
         "Plan dissemination, exploitation, and communication: target "
         "audiences, channels, IPR strategy."
     ),
-    SectionType.OTHER: (
-        "Provide a clear, well-structured contribution to this section."
-    ),
+    SectionType.OTHER: ("Provide a clear, well-structured contribution to this section."),
 }
 
 
@@ -154,7 +153,7 @@ class SectionPromptBuilder:
         request: GenerationRequest,
         results: list[RetrievalResult],
         *,
-        profile: "DraftingProfile | None" = None,
+        profile: DraftingProfile | None = None,
     ) -> tuple[str, list[CitationRef]]:
         """Return ``(prompt_text, citations)`` for the given request and results.
 
@@ -208,34 +207,38 @@ class SectionPromptBuilder:
         # Add expected outputs if the profile defines them.
         if expected_outputs:
             outputs_list = "\n".join(f"* {output}" for output in expected_outputs)
-            prompt_parts.extend([
-                "\n",
-                "## Expected outputs\n",
-                "Consider including the following elements where relevant:\n",
-                f"{outputs_list}\n",
-            ])
+            prompt_parts.extend(
+                [
+                    "\n",
+                    "## Expected outputs\n",
+                    "Consider including the following elements where relevant:\n",
+                    f"{outputs_list}\n",
+                ]
+            )
 
-        prompt_parts.extend([
-            "\n",
-            "## Call / topic context\n",
-            f"{call_context}\n",
-            "\n",
-            "## Retrieved evidence\n",
-            "Use the following examples from past proposals as inspiration. "
-            "Each example is labeled with its source status. **Funded** examples "
-            "represent successful patterns; **Rejected** examples are cautionary; "
-            "**ESR notes** are advisory commentary, not ground truth. Cite each "
-            "example you use as [N].\n",
-            "\n",
-            f"{evidence_block}\n",
-            "\n",
-            "## Output instructions\n",
-            "Write a concise, technically precise draft of the section in markdown. "
-            "Cite supporting evidence inline using [N] markers matching the numbered "
-            "list above. Do not invent information not supported by the retrieved "
-            "evidence. If a citation is from a REJECTED example, frame it as a "
-            "cautionary lesson. Do not cite ESR notes as fact.\n",
-        ])
+        prompt_parts.extend(
+            [
+                "\n",
+                "## Call / topic context\n",
+                f"{call_context}\n",
+                "\n",
+                "## Retrieved evidence\n",
+                "Use the following examples from past proposals as inspiration. "
+                "Each example is labeled with its source status. **Funded** examples "
+                "represent successful patterns; **Rejected** examples are cautionary; "
+                "**ESR notes** are advisory commentary, not ground truth. Cite each "
+                "example you use as [N].\n",
+                "\n",
+                f"{evidence_block}\n",
+                "\n",
+                "## Output instructions\n",
+                "Write a concise, technically precise draft of the section in markdown. "
+                "Cite supporting evidence inline using [N] markers matching the numbered "
+                "list above. Do not invent information not supported by the retrieved "
+                "evidence. If a citation is from a REJECTED example, frame it as a "
+                "cautionary lesson. Do not cite ESR notes as fact.\n",
+            ]
+        )
 
         prompt = "".join(prompt_parts)
 
@@ -261,8 +264,7 @@ class SectionPromptBuilder:
                     programme=proposal.programme,
                     call_id=proposal.call_id,
                     proposal_title=proposal.proposal_title,
-                    section_heading=meta.parent_section_heading
-                    or meta.anchor.section_heading,
+                    section_heading=meta.parent_section_heading or meta.anchor.section_heading,
                     page=meta.anchor.page,
                     chunk_id=chunk.chunk_id,
                     snippet=_truncate_snippet(chunk.text),

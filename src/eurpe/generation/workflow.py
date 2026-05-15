@@ -137,7 +137,7 @@ class SectionGenerationWorkflow:
         self,
         request: GenerationRequest,
         *,
-        profile: "DraftingProfile | None" = None,
+        profile: DraftingProfile | None = None,
     ) -> GenerationDraft:
         """Drive the full pipeline for one request and return a :class:`GenerationDraft`.
 
@@ -212,7 +212,7 @@ class SectionGenerationWorkflow:
         request: GenerationRequest,
         results: list[RetrievalResult],
         *,
-        profile: "DraftingProfile | None" = None,
+        profile: DraftingProfile | None = None,
     ) -> tuple[str, list[CitationRef]]:
         """Delegate to the configured :class:`SectionPromptBuilder`.
 
