@@ -34,12 +34,14 @@ from eurpe.config import (
 )
 from eurpe.ingestion.docling_parser import DoclingProposalParser
 from eurpe.ingestion.errors import IngestionError
+from eurpe.ingestion.hashing import compute_content_hash
 from eurpe.retrieval.chunker import HierarchicalChunker
+from eurpe.retrieval.dedup import DuplicateAction, evaluate_duplicate
 from eurpe.retrieval.embeddings import make_embedder
 from eurpe.retrieval.errors import IndexingError
 from eurpe.retrieval.index import ChromaIndex
 from eurpe.retrieval.models import Chunk
-from eurpe.retrieval.pipeline import index_proposal
+from eurpe.retrieval.pipeline import index_proposal, reindex_proposal
 from eurpe.retrieval.retriever import (
     RetrievalPolicy,
     RetrievalResult,
@@ -163,14 +165,33 @@ def build(
         "--collection",
         help="Chroma collection name (3-512 chars, [a-zA-Z0-9._-]).",
     ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help=(
+            "Replace existing records when a soft duplicate is detected "
+            "((proposal_title, call_id) collision with different bytes). "
+            "Hard duplicates (byte-identical content) are skipped regardless."
+        ),
+    ),
 ) -> None:
     """Build (or update) the local index from one or more YAML sidecars.
 
     For each YAML the referenced PDF is parsed via Docling, chunked,
-    embedded, and upserted into the configured Chroma collection.
-    The ``upsert`` operation is idempotent on
-    :attr:`Chunk.chunk_id`, so re-running this command on the same
-    inputs leaves the collection in the same state.
+    embedded, and upserted into the configured Chroma collection. Before
+    every upsert the command runs duplicate detection
+    (:func:`eurpe.retrieval.evaluate_duplicate`):
+
+    * Byte-identical content → skipped, batch continues.
+    * Same PDF filename stem with different bytes → automatic re-index
+      (delete-then-upsert) so the index never grows orphan chunks.
+    * Same ``(proposal_title, call_id)`` with different bytes/stem →
+      skipped unless ``--force`` is supplied, in which case the existing
+      record is replaced.
+
+    The summary line at the end reports the per-bucket counts so an
+    operator can spot duplicates landing without scanning each per-file
+    line.
     """
 
     used_path = ensure_config_file(config_path, EXAMPLE_CONFIG_PATH)
@@ -189,6 +210,9 @@ def build(
     )
 
     total_added = 0
+    added = 0
+    reindexed = 0
+    skipped = 0
     for yaml_path in metadata_yamls:
         if not yaml_path.exists():
             typer.echo(f"error: metadata file not found: {yaml_path}", err=True)
@@ -201,6 +225,41 @@ def build(
             raise typer.Exit(code=1) from exc
 
         pdf_path = _resolve_pdf_path(yaml_path, proposal_meta.source_path)
+        # Stamp the content hash onto the metadata BEFORE parsing so
+        # duplicate detection can answer "have we seen these bytes?"
+        # without paying Docling's parse cost on a known duplicate.
+        content_hash = compute_content_hash(pdf_path)
+        proposal_meta = proposal_meta.model_copy(update={"content_hash": content_hash})
+
+        # Unlike the HTTP confirm route, the CLI does not archive the
+        # PDF — the YAML sidecar already points at its final on-disk
+        # location. The PDF stem is therefore the natural document_id.
+        new_document_id = Path(pdf_path).stem
+        decision = evaluate_duplicate(
+            index=index,
+            content_hash=content_hash,
+            proposal_title=proposal_meta.proposal_title,
+            call_id=proposal_meta.call_id,
+            new_document_id=new_document_id,
+        )
+
+        if decision.action is DuplicateAction.BLOCK_HARD:
+            typer.echo(
+                f"  skipped {yaml_path.name}: duplicate skipped (already indexed): "
+                f"{decision.reason}",
+                err=True,
+            )
+            skipped += 1
+            continue
+        if decision.action is DuplicateAction.BLOCK_SOFT and not force:
+            typer.echo(
+                f"  skipped {yaml_path.name}: duplicate suspected: {decision.reason} "
+                "Re-run with --force to replace.",
+                err=True,
+            )
+            skipped += 1
+            continue
+
         try:
             parsed = parser.parse(pdf_path)
         except IngestionError as exc:
@@ -208,22 +267,37 @@ def build(
             raise typer.Exit(code=1) from exc
 
         try:
-            chunk_count = index_proposal(
-                parsed,
-                proposal_meta,
-                chunker=chunker,
-                index=index,
-            )
+            if decision.action in (DuplicateAction.REINDEX, DuplicateAction.BLOCK_SOFT):
+                assert decision.conflicting_document_id is not None
+                chunk_count = reindex_proposal(
+                    parsed,
+                    proposal_meta,
+                    chunker=chunker,
+                    index=index,
+                    replaced_document_id=decision.conflicting_document_id,
+                )
+                reindexed += 1
+                verb = "reindexed"
+            else:
+                chunk_count = index_proposal(
+                    parsed,
+                    proposal_meta,
+                    chunker=chunker,
+                    index=index,
+                )
+                added += 1
+                verb = "ingested"
         except IndexingError as exc:
             typer.echo(f"error: index upsert failed: {exc}", err=True)
             raise typer.Exit(code=1) from exc
 
         total_added += chunk_count
-        typer.echo(f"  ingested {yaml_path.name}: {chunk_count} chunks from {pdf_path.name}")
+        typer.echo(f"  {verb} {yaml_path.name}: {chunk_count} chunks from {pdf_path.name}")
 
     typer.echo("")
     typer.echo(
-        f"Done. {total_added} chunks added; collection {collection!r} now holds {index.count()}."
+        f"Done. {added} added, {reindexed} reindexed, {skipped} skipped (duplicates). "
+        f"Collection {collection!r} now holds {index.count()}."
     )
 
 
