@@ -81,9 +81,7 @@ def test_topic_context_is_not_empty_when_topic_title_set() -> None:
 
 
 def test_topic_context_is_not_empty_when_outcomes_populated() -> None:
-    ctx = TopicContext(
-        expected_outcomes=["one"], source=TopicSource.PASTED_TEXT
-    )
+    ctx = TopicContext(expected_outcomes=["one"], source=TopicSource.PASTED_TEXT)
     assert ctx.is_empty() is False
 
 

@@ -185,8 +185,4 @@ class TopicContext(BaseModel):
         free-text ``call_context`` path.
         """
 
-        return (
-            not self.topic_id
-            and not self.topic_title
-            and not self.expected_outcomes
-        )
+        return not self.topic_id and not self.topic_title and not self.expected_outcomes

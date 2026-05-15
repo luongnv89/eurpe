@@ -55,9 +55,7 @@ def test_extract_text_recovers_expected_outcomes_as_bullets() -> None:
     assert ctx.expected_outcomes[0] == (
         "Reduced mean-time-to-recover for critical-sector outages by 30%."
     )
-    assert ctx.expected_outcomes[1] == (
-        "New open standards for resilient communication protocols."
-    )
+    assert ctx.expected_outcomes[1] == ("New open standards for resilient communication protocols.")
     assert ctx.expected_outcomes[2] == "Trained workforce across 5+ EU member states."
 
 
@@ -92,9 +90,7 @@ def test_extract_text_records_pdf_source_when_path_provided() -> None:
     the text extractor with the PDF path attached.
     """
 
-    ctx = extract_topic_context_from_text(
-        _load_fixture(), source_path="/tmp/example.pdf"
-    )
+    ctx = extract_topic_context_from_text(_load_fixture(), source_path="/tmp/example.pdf")
     assert ctx.source is TopicSource.PDF_EXCERPT
     assert ctx.source_path == "/tmp/example.pdf"
 
@@ -162,14 +158,7 @@ def test_extract_text_outcomes_with_no_bullets_split_on_blank_lines() -> None:
 
 
 def test_extract_text_handles_numbered_bullets() -> None:
-    text = (
-        "Expected Outcomes:\n"
-        "1. first\n"
-        "2. second\n"
-        "3. third\n"
-        "\n"
-        "Scope: x\n"
-    )
+    text = "Expected Outcomes:\n1. first\n2. second\n3. third\n\nScope: x\n"
     ctx = extract_topic_context_from_text(text)
     assert ctx.expected_outcomes == ["first", "second", "third"]
 
@@ -177,13 +166,7 @@ def test_extract_text_handles_numbered_bullets() -> None:
 def test_extract_text_no_section_guidance_when_heading_missing() -> None:
     """Absent ``Methodology guidance:`` heading → empty dict (no infer)."""
 
-    text = (
-        "Topic: 952672\n"
-        "Expected Outcomes:\n"
-        "- one\n"
-        "Scope:\n"
-        "x\n"
-    )
+    text = "Topic: 952672\nExpected Outcomes:\n- one\nScope:\nx\n"
     ctx = extract_topic_context_from_text(text)
     assert ctx.section_guidance == {}
 
@@ -257,9 +240,7 @@ def test_extract_pdf_delegates_to_text_extractor_via_stub(tmp_path: Path) -> Non
             ),
             _StubParsedSection(
                 heading="Scope",
-                text=(
-                    "Proposals should address the resilience of digital infrastructure."
-                ),
+                text=("Proposals should address the resilience of digital infrastructure."),
             ),
         ],
     )

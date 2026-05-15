@@ -255,9 +255,7 @@ def _extract_block_after_heading(text: str, heading: str) -> str | None:
     # short value follows; we still treat it as a heading because the
     # block above it has ended.
     terminator_pattern = re.compile(
-        r"^[ \t]*(?:"
-        + "|".join(re.escape(t) for t in _BLOCK_TERMINATORS)
-        + r")[ \t]*(?:[:]|$)",
+        r"^[ \t]*(?:" + "|".join(re.escape(t) for t in _BLOCK_TERMINATORS) + r")[ \t]*(?:[:]|$)",
         re.IGNORECASE | re.MULTILINE,
     )
     end = len(text)
@@ -301,7 +299,7 @@ def _split_bullets(block: str) -> list[str]:
                     if joined:
                         bullets.append(joined)
                     current = []
-                current.append(line[m.end():])
+                current.append(line[m.end() :])
             elif line.strip():
                 # Continuation of the current bullet.
                 if current:

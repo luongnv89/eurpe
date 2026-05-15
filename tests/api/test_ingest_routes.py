@@ -80,9 +80,7 @@ class _StubParser:
 
 
 @pytest.fixture
-def configured_app(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> Iterator[TestClient]:
+def configured_app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
     """Yield a TestClient wired to a tmp-dir offline config + stub parser.
 
     ``make_embedder`` probes Ollama with ``socket.create_connection`` to
