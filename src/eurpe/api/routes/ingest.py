@@ -149,19 +149,24 @@ def _stage_upload(
     return target
 
 
-def _build_draft(parsed_path: Path, parsed_title: str | None) -> dict:
-    """Best-effort metadata draft from filename + parsed title.
+def _build_draft(original_filename: str, parsed_title: str | None) -> dict:
+    """Best-effort metadata draft from the operator's filename + parsed title.
 
     Reuses :func:`extract_topic_context_from_text` to recover programme /
     call_id / topic_id from the filename string. The function lives in
     :mod:`eurpe.intake.extractor` and intentionally duplicates the test
     helper's regex constants — see the extractor's module docstring for
     the rationale (production never imports from ``tests/``).
+
+    Why ``original_filename`` instead of the staged path: the staged path
+    is prefixed with the parse-token UUID (see :func:`_stage_upload`), and
+    the regex extractor would happily match digits inside the UUID before
+    the real call/topic identifiers in the operator's filename.
     """
 
     # Feed both the filename and the document title so a generous match
     # window catches programme tokens that appear in either.
-    seed = parsed_path.name
+    seed = original_filename
     if parsed_title:
         seed = f"{seed}\n{parsed_title}"
     ctx = extract_topic_context_from_text(seed)
@@ -274,7 +279,7 @@ def parse(
             detail=f"failed to parse PDF: {exc}",
         ) from exc
 
-    draft = _build_draft(pdf_path, parsed.title)
+    draft = _build_draft(safe_name, parsed.title)
     record = store.put(
         token=token,
         pdf_path=pdf_path,

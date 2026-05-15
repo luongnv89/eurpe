@@ -155,7 +155,10 @@ class ParseTokenStore:
             self._safe_unlink(path)
             return None
         if expires.timestamp() <= time.time():
+            pdf_path = raw.get("pdf_path")
             self._safe_unlink(path)
+            if isinstance(pdf_path, str):
+                self._safe_unlink(Path(pdf_path))
             return None
         try:
             parsed_at = datetime.fromisoformat(raw["parsed_at"])
