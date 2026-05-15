@@ -25,6 +25,10 @@ import type {
 // is one diff line away from review.
 const REQUIRED_FIELDS = ["programme", "call_id", "topic_id", "year", "outcome"] as const;
 
+// Hoisted out of the component so a re-render doesn't recompute the value
+// and accidentally retrigger the field-reset effect at year boundaries.
+const DEFAULT_YEAR = new Date().getFullYear();
+
 interface Props {
   parseResult: ParseResponse;
   enums: EnumsResponse;
@@ -43,16 +47,11 @@ export function ConfirmationForm({
   onCancel,
 }: Props) {
   const suggested = parseResult.suggested ?? {};
-  // Default the year to the topic_id-bearing call's year if we can guess
-  // it; otherwise the current calendar year. The form validates the
-  // 2014-2099 window server-side so a user-typed value still has to
-  // make sense.
-  const currentYear = new Date().getFullYear();
 
   const [programme, setProgramme] = useState<string>(suggested.programme ?? "");
   const [callId, setCallId] = useState<string>(suggested.call_id ?? "");
   const [topicId, setTopicId] = useState<string>(suggested.topic_id ?? "");
-  const [year, setYear] = useState<string>(String(currentYear));
+  const [year, setYear] = useState<string>(String(DEFAULT_YEAR));
   const [outcome, setOutcome] = useState<string>("");
   const [proposalTitle, setProposalTitle] = useState<string>(
     suggested.proposal_title ?? parseResult.title ?? "",
@@ -61,7 +60,9 @@ export function ConfirmationForm({
   const [clientErrors, setClientErrors] = useState<string[]>([]);
 
   // Keep the local fields in sync if the parent sends a fresh
-  // parseResult (e.g. operator started over).
+  // parseResult (e.g. operator started over). The dep list keys on the
+  // parse_token because every other field on parseResult is downstream
+  // of it — a new token means a brand-new upload.
   useEffect(() => {
     setProgramme(suggested.programme ?? "");
     setCallId(suggested.call_id ?? "");
@@ -69,9 +70,10 @@ export function ConfirmationForm({
     setProposalTitle(suggested.proposal_title ?? parseResult.title ?? "");
     setConsortium("");
     setOutcome("");
-    setYear(String(currentYear));
+    setYear(String(DEFAULT_YEAR));
     setClientErrors([]);
-  }, [parseResult, suggested.programme, suggested.call_id, suggested.topic_id, suggested.proposal_title, parseResult.title, currentYear]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [parseResult.parse_token]);
 
   function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
