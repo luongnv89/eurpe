@@ -63,6 +63,7 @@ from eurpe.generation.render import (
     STATUS_LABEL,
     MarkdownCitationRenderer,
 )
+from eurpe.generation.service import GenerationService, SectionGenerationRequest
 from eurpe.generation.workflow import SectionGenerationWorkflow
 
 __all__ = [
@@ -80,11 +81,13 @@ __all__ = [
     "GenerationDraft",
     "GenerationError",
     "GenerationRequest",
+    "GenerationService",
     "LLMClient",
     "LLMUnavailableError",
     "MarkdownCitationRenderer",
     "OfflineLLMError",
     "OllamaLLMClient",
+    "SectionGenerationRequest",
     "SectionGenerationWorkflow",
     "SectionPromptBuilder",
     "list_available_profiles",

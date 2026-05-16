@@ -47,6 +47,11 @@ from eurpe.retrieval.retriever import (
     RetrievalResult,
     SourceStatusAwareRetriever,
 )
+from eurpe.retrieval.service import (
+    RetrievalQuery,
+    RetrievalResponse,
+    RetrievalService,
+)
 
 __all__ = [
     "Chunk",
@@ -61,7 +66,10 @@ __all__ = [
     "OfflineEmbeddingError",
     "OllamaEmbedder",
     "RetrievalPolicy",
+    "RetrievalQuery",
+    "RetrievalResponse",
     "RetrievalResult",
+    "RetrievalService",
     "SourceStatusAwareRetriever",
     "evaluate_duplicate",
     "index_proposal",
