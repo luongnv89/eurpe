@@ -348,3 +348,78 @@ def test_no_policy_means_backward_compatible(monkeypatch: pytest.MonkeyPatch) ->
     )
     embedder.embed(["x"])
     assert invoked == [True]
+
+
+# ---------------------------------------------------------------------------
+# Factory wiring (make_embedder / make_llm_client)
+# ---------------------------------------------------------------------------
+
+
+def test_make_embedder_wires_policy_into_client(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """make_embedder MUST pass the gate it built into the OllamaEmbedder.
+
+    A regression where the factory builds a gate but forgets to pass
+    ``policy=policy`` to ``OllamaEmbedder(...)`` would leave the
+    embedder un-gated. This test pins the wiring by configuring a
+    non-loopback URL with no allowlist and asserting the embedder's
+    first call raises EgressDeniedError.
+    """
+
+    from eurpe.config import EurpeConfig, ModelsConfig
+    from eurpe.retrieval.embeddings import make_embedder
+
+    # offline_mode=False so the factory skips the probe and returns the
+    # real OllamaEmbedder we want to verify is gated.
+    cfg = EurpeConfig(
+        runtime_dir=tmp_path,
+        offline_mode=False,
+        models=ModelsConfig(ollama_base_url="http://example.com:443"),
+    )
+
+    # Stub httpx.Client so a wiring regression that allowed the call
+    # to reach the transport would still not actually hit the network.
+    import httpx
+
+    def _should_not_build(*_args, **_kwargs):
+        raise AssertionError("httpx.Client must not be built when gate denies")
+
+    monkeypatch.setattr(httpx, "Client", _should_not_build)
+
+    embedder = make_embedder(cfg)
+    with pytest.raises(EgressDeniedError):
+        embedder.embed(["x"])
+
+
+def test_make_llm_client_wires_policy_into_client(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """make_llm_client MUST pass the gate into the OllamaLLMClient.
+
+    Same regression vector as the embedder factory: a refactor that
+    forgets to pass ``policy=policy`` would silently un-gate the LLM.
+    """
+
+    from eurpe.config import EurpeConfig, ModelsConfig
+    from eurpe.generation.llm import make_llm_client
+
+    cfg = EurpeConfig(
+        runtime_dir=tmp_path,
+        offline_mode=False,
+        models=ModelsConfig(
+            ollama_base_url="http://example.com:443",
+            llm_model="llama3.1:8b",
+        ),
+    )
+
+    import httpx
+
+    def _should_not_build(*_args, **_kwargs):
+        raise AssertionError("httpx.Client must not be built when gate denies")
+
+    monkeypatch.setattr(httpx, "Client", _should_not_build)
+
+    client = make_llm_client(cfg)
+    with pytest.raises(EgressDeniedError):
+        client.generate("any-prompt")
