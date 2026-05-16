@@ -113,6 +113,17 @@ class EurpeConfig(BaseModel):
 
         return self.runtime_dir / "network-audit.log"
 
+    def analytics_log_path(self) -> Path:
+        """Path to the JSONL log of local analytics events.
+
+        Lives under ``runtime_dir`` so wiping runtime state removes the
+        log. AC3 of issue #13 requires that this file never leaves the
+        runtime directory unless the user explicitly runs ``eurpe
+        analytics export``.
+        """
+
+        return self.runtime_dir / "analytics-events.log"
+
 
 def ensure_config_file(
     config_path: Path = DEFAULT_CONFIG_PATH,
