@@ -7,11 +7,25 @@ sentinels appear anywhere in the file content.
 
 This is the keystone proof of AC2: "Tests confirm event payloads do
 not include raw document content, retrieved passages, or generated
-draft text." The deterministic LLM stub echoes the user intent and the
-section type into the draft text, so a single check on the intent
-sentinel covers both the "intent leaked" and "draft text leaked"
-failure modes — the stub's draft text contains the same sentinel
-substring as the intent.
+draft text." The test relies on two complementary signals:
+
+1. **Intent leak.** The user-intent sentinel must not appear in the
+   JSONL. A future regression that passed ``request.user_intent`` (or
+   any derived prompt fragment) into an event payload would fail
+   here.
+2. **Retrieved-passage leak.** Each corpus chunk carries a unique
+   ``SENTINEL_SNIPPET_*`` substring. The retriever surfaces those
+   chunks as ``CitationRef.snippet`` values; a regression that
+   passed the citation list or any snippet into an event payload
+   would fail here.
+
+Draft text is covered indirectly: the workflow's
+``_emit_draft_completed`` never receives the generated ``text``, only
+the citation list and operational metadata. The structural absence
+of any ``text`` parameter on the emit path is what makes the
+draft-text leak architecturally impossible — and the no-outbound-IO
+architectural test reinforces this by pinning that the analytics
+package cannot transitively pull in any IO module.
 
 The test reads the JSONL as raw text on purpose; an assertion on
 model fields could miss a content leak that landed in a stringified
@@ -178,15 +192,23 @@ def test_workflow_emits_two_events_with_no_content_leak(tmp_path: Path) -> None:
     # citation; otherwise the test would not exercise the
     # source_status_mix path.
     assert draft.citations, "test corpus must produce at least one citation"
+    # Sanity: the snippet sentinel actually flows through into at
+    # least one citation. Otherwise the "snippet not in JSONL"
+    # assertion below would be vacuously true.
+    assert any(_SENTINEL_SNIPPET_PREFIX in c.snippet for c in draft.citations), (
+        "test corpus must surface sentinel-bearing snippets so the "
+        "leak assertion is meaningful"
+    )
 
     raw = log_path.read_text(encoding="utf-8")
     lines = [line for line in raw.splitlines() if line.strip()]
     assert len(lines) == 2, f"expected 2 events, got {len(lines)}: {lines!r}"
 
     # AC2 strict invariant: NO sentinel anywhere in the file content.
-    # Covers both intent and draft-text leak paths because the
-    # deterministic LLM stub echoes the intent verbatim into the
-    # draft, so the same sentinel covers both leak shapes.
+    # The intent sentinel catches a future regression that passed
+    # request.user_intent (or any prompt fragment derived from it)
+    # into an event payload — the workflow architecturally never does
+    # this today, and this test pins that.
     assert _SENTINEL_INTENT not in raw, (
         f"user_intent sentinel leaked into analytics log:\n{raw!r}"
     )
