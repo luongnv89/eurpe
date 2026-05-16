@@ -26,23 +26,43 @@ is the chokepoint that protects the contract.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 from datetime import UTC, datetime
 from pathlib import Path
 from threading import Lock
 
-# Dedicated logger so we can attach a FileHandler without polluting the
-# root logger or the rest of the application. ``propagate=False`` (set
-# in :func:`_get_audit_logger`) keeps these lines out of stdout.
+# Parent namespace for every audit logger. Each distinct audit-log
+# path gets its OWN child logger ``eurpe.security.audit.<hash>``; the
+# parent itself is never written to. Per-path isolation is what stops
+# two ``NetworkPolicyGate`` instances with different audit paths from
+# cross-contaminating each other's JSONL files when both run in the
+# same process. ``propagate=False`` (set in :func:`_get_audit_logger`)
+# keeps these lines out of stdout.
 _AUDIT_LOGGER_NAME = "eurpe.security.audit"
 
-# Cache of ``{audit_log_path: FileHandler}`` keyed by absolute path. We
-# memoise so a process that creates multiple ``NetworkPolicyGate``
-# instances (one per factory call, e.g.) doesn't accumulate duplicate
-# handlers on the logger.
+# Cache of ``{absolute_path: FileHandler}`` keyed by resolved absolute
+# path. We memoise so a process that creates multiple gates pointing at
+# the SAME file (one per factory call, e.g.) doesn't accumulate
+# duplicate handlers on that path's child logger.
 _HANDLERS: dict[str, logging.FileHandler] = {}
 _LOCK = Lock()
+
+
+def _child_logger_name(audit_log_path: Path) -> str:
+    """Return the child-logger name used for one audit-log path.
+
+    Hash of the absolute path → short hex digest. We don't put the
+    path itself in the name because the logging-tree convention is
+    dotted segments without slashes or spaces, and arbitrary
+    filesystem paths violate that.
+    """
+
+    digest = hashlib.sha1(
+        str(audit_log_path.resolve()).encode("utf-8"), usedforsecurity=False
+    ).hexdigest()[:16]
+    return f"{_AUDIT_LOGGER_NAME}.{digest}"
 
 
 def _redact_path(path: str) -> str:
@@ -85,13 +105,20 @@ def _redact_path(path: str) -> str:
 
 
 def _get_audit_logger(audit_log_path: Path) -> logging.Logger:
-    """Return the audit logger, attaching a :class:`FileHandler` if needed.
+    """Return the per-path child logger, attaching a :class:`FileHandler` if needed.
 
-    The handler is attached lazily and cached by absolute path so:
+    Each distinct audit-log path gets its own child logger
+    (``eurpe.security.audit.<hash>``) with its own handler. Two gates
+    pointing at different files share NO handlers, so a write to one
+    file cannot leak into the other. ``propagate=False`` on every
+    child stops the line from bubbling to the parent / root.
 
-    * multiple gates writing to the same path share one handler;
-    * tests using ``tmp_path`` get their own handler per test and don't
-      leak lines into a sibling test's log.
+    Caching by absolute path means:
+
+    * multiple gates writing to the SAME path share one handler (no
+      duplicate writes);
+    * tests using ``tmp_path`` get their own child logger per path
+      and don't leak lines into a sibling test's log.
 
     The parent directory MUST already exist — the gate guarantees this
     via ``EurpeConfig.runtime_dir`` being created by
@@ -100,9 +127,11 @@ def _get_audit_logger(audit_log_path: Path) -> logging.Logger:
     bootstrapping bug, not an audit-log bug).
     """
 
-    logger = logging.getLogger(_AUDIT_LOGGER_NAME)
-    # Don't propagate to root — these lines must not leak into stdout
-    # or any other handler the application installs for general logging.
+    logger = logging.getLogger(_child_logger_name(audit_log_path))
+    # Don't propagate to the parent / root — these lines must not leak
+    # into stdout or any other handler the application installs for
+    # general logging, AND they must not leak into a sibling path's
+    # child logger via the shared parent.
     logger.propagate = False
     if logger.level == logging.NOTSET:
         logger.setLevel(logging.INFO)
@@ -195,11 +224,13 @@ def _reset_handlers_for_tests() -> None:
     need a clean logger state can call this from a fixture teardown.
     """
 
-    logger = logging.getLogger(_AUDIT_LOGGER_NAME)
     with _LOCK:
-        for handler in list(_HANDLERS.values()):
+        for key, handler in list(_HANDLERS.items()):
+            # ``key`` is the resolved absolute path string used to
+            # build the child-logger name; reconstruct it to detach.
+            child = logging.getLogger(_child_logger_name(Path(key)))
             try:
-                logger.removeHandler(handler)
+                child.removeHandler(handler)
                 handler.close()
             except Exception:  # pragma: no cover - defensive
                 pass

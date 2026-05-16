@@ -360,14 +360,16 @@ def make_embedder(config: object) -> Embedder:
 
     # Build the network policy once and pass it to both the probe and
     # the embedder. ``make_network_policy`` is duck-typed on the same
-    # config so a partial mock still works.
+    # config so a partial mock still works. Narrow except: only the
+    # documented "partial mock" failure modes (missing runtime_dir →
+    # ValueError, non-path audit_log_path → TypeError, missing attribute
+    # on a heavily stubbed mock → AttributeError) fall through to the
+    # legacy no-gate path. A real bug in NetworkPolicyGate construction
+    # (anything else) MUST surface loudly rather than silently fail-open.
     policy: NetworkPolicyGate | None
     try:
         policy = make_network_policy(config)
-    except Exception:  # pragma: no cover - defensive: degraded mock
-        # If the config can't supply enough info to build a gate
-        # (partial test mocks), fall back to the legacy behaviour:
-        # no gate, no audit, deterministic fallback on probe failure.
+    except (ValueError, TypeError, AttributeError):  # pragma: no cover - defensive: degraded mock
         policy = None
 
     if offline_mode and not _ollama_reachable(ollama_base_url, policy=policy):

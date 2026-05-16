@@ -400,13 +400,16 @@ def make_llm_client(config: object) -> LLMClient:
 
     # Build the gate once and pass it to both the probe and the
     # client. ``make_network_policy`` is duck-typed; a partial mock
-    # without ``network_audit_log_path`` would raise — wrap defensively
-    # so the legacy "no-gate" path survives for tests that pass minimal
-    # ad-hoc configs.
+    # without ``network_audit_log_path`` would raise — wrap narrowly so
+    # only the documented "partial mock" failure modes (ValueError when
+    # runtime_dir/audit_log_path are both missing, TypeError on a
+    # non-path return, AttributeError on a heavily stubbed mock) fall
+    # back to the legacy no-gate path. A real construction bug must
+    # surface, not fail-open silently.
     policy: NetworkPolicyGate | None
     try:
         policy = make_network_policy(config)
-    except Exception:  # pragma: no cover - defensive: degraded mock
+    except (ValueError, TypeError, AttributeError):  # pragma: no cover - defensive: degraded mock
         policy = None
 
     if offline_mode and not _ollama_llm_reachable(ollama_base_url, policy=policy):

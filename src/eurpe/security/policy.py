@@ -158,11 +158,13 @@ class NetworkPolicyGate:
         * ``source`` — call-site label like ``ollama_embedder.embed``;
           required so an auditor can find the originating call site.
 
-        Returns :class:`Decision.ALLOWED` on allow. Raises
-        :class:`EgressDeniedError` on deny — but ALSO returns the
-        :class:`Decision.DENIED` value before the raise is suppressed
-        by tests that catch the exception, so the type hint stays
-        accurate.
+        Returns :class:`Decision.ALLOWED` when the call may proceed.
+        On deny, raises :class:`EgressDeniedError` and never returns —
+        callers that catch the exception observe the raise, not a
+        ``Decision.DENIED`` return value. The return type is annotated
+        as :class:`Decision` (rather than ``Literal[Decision.ALLOWED]``)
+        so the enum remains the single source of truth for downstream
+        readers; the runtime guarantee is "allow → return, deny → raise".
         """
 
         decision, reason = self._decide(host, port)

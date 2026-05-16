@@ -24,6 +24,7 @@ import pytest
 
 from eurpe.security.audit import (
     _AUDIT_LOGGER_NAME,
+    _child_logger_name,
     _redact_path,
     _reset_handlers_for_tests,
     log_attempt,
@@ -148,12 +149,12 @@ def test_log_attempt_handler_is_reused_across_calls(tmp_path: Path) -> None:
     # Should have exactly 5 lines, not 5*N.
     lines = audit_log.read_text(encoding="utf-8").strip().splitlines()
     assert len(lines) == 5
-    # And the logger should have exactly ONE FileHandler pointing at
-    # this path.
-    audit_logger = logging.getLogger(_AUDIT_LOGGER_NAME)
+    # And the per-path child logger should have exactly ONE
+    # FileHandler pointing at this path.
+    child = logging.getLogger(_child_logger_name(audit_log))
     file_handlers = [
         h
-        for h in audit_logger.handlers
+        for h in child.handlers
         if isinstance(h, logging.FileHandler)
         and Path(h.baseFilename).resolve() == audit_log.resolve()
     ]
@@ -176,7 +177,9 @@ def test_log_attempt_does_not_propagate_to_root(tmp_path: Path, caplog) -> None:
             source="src",
         )
     # caplog captures records that propagate to root; audit must not.
-    propagated = [r for r in caplog.records if r.name == _AUDIT_LOGGER_NAME]
+    # The per-path child loggers all live under _AUDIT_LOGGER_NAME, so
+    # filter by the parent namespace to catch any leak from any path.
+    propagated = [r for r in caplog.records if r.name.startswith(_AUDIT_LOGGER_NAME)]
     assert propagated == []
 
 
@@ -194,6 +197,47 @@ def test_log_attempt_records_decision_string(tmp_path: Path) -> None:
     )
     rec = _read_one(audit_log)
     assert rec["decision"] == "DENIED"
+
+
+def test_log_attempt_isolates_writes_per_path(tmp_path: Path) -> None:
+    """Two gates with different audit paths must NOT cross-contaminate.
+
+    Regression guard for a process-global handler cache that, before
+    the per-path child-logger refactor, attached every handler to the
+    single ``eurpe.security.audit`` logger — every ``log_attempt`` call
+    would then write to BOTH files. With per-path child loggers, a
+    write to path A appears only in file A.
+    """
+
+    log_a = tmp_path / "a.log"
+    log_b = tmp_path / "b.log"
+    log_attempt(
+        log_a,
+        host="127.0.0.1",
+        port=1,
+        scheme="http",
+        path="/api/a",
+        decision="ALLOWED",
+        reason="loopback",
+        source="src-a",
+    )
+    log_attempt(
+        log_b,
+        host="127.0.0.1",
+        port=2,
+        scheme="http",
+        path="/api/b",
+        decision="ALLOWED",
+        reason="loopback",
+        source="src-b",
+    )
+
+    a_rec = _read_one(log_a)
+    b_rec = _read_one(log_b)
+    assert a_rec["source"] == "src-a"
+    assert a_rec["port"] == 1
+    assert b_rec["source"] == "src-b"
+    assert b_rec["port"] == 2
 
 
 def test_log_attempt_keyword_only_arguments(tmp_path: Path) -> None:

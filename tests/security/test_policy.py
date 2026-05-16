@@ -51,6 +51,12 @@ def audit_log(tmp_path: Path) -> Path:
         "127.255.255.254",
         "::1",
         "[::1]",
+        # IPv4-mapped IPv6 loopback. Python's ipaddress module reports
+        # ``::ffff:127.0.0.1`` as is_loopback=True (the embedded v4 is
+        # in the loopback /8). Pinned here so a future refactor that
+        # changes the loopback helper can't silently drop this case.
+        "::ffff:127.0.0.1",
+        "[::ffff:127.0.0.1]",
     ],
 )
 def test_is_loopback_recognises_loopback_hosts(host: str) -> None:
@@ -91,6 +97,20 @@ def test_localhost_string_allowed_without_allowlist(audit_log: Path) -> None:
 def test_ipv6_loopback_allowed_without_allowlist(audit_log: Path) -> None:
     gate = NetworkPolicyGate(allowlist=[], audit_log_path=audit_log)
     assert gate.check("::1", 443, "https", "/", "test") is Decision.ALLOWED
+
+
+def test_ipv4_mapped_ipv6_loopback_allowed_without_allowlist(
+    audit_log: Path,
+) -> None:
+    """``::ffff:127.0.0.1`` is the IPv4-mapped form of 127.0.0.1.
+
+    Pinned so the gate keeps allowing it; a regression here would
+    surprise anyone who configures Ollama to bind on a v6 socket and
+    receives v4-mapped connections from local clients.
+    """
+
+    gate = NetworkPolicyGate(allowlist=[], audit_log_path=audit_log)
+    assert gate.check("::ffff:127.0.0.1", 11434, "http", "/api/x", "test") is Decision.ALLOWED
 
 
 def test_non_loopback_denied_without_allowlist(audit_log: Path) -> None:

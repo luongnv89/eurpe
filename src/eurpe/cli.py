@@ -23,7 +23,7 @@ from eurpe.config import (
 from eurpe.generation.cli import generate_app
 from eurpe.ingestion.cli import ingest as ingest_command
 from eurpe.retrieval.cli import index_app
-from eurpe.security import Decision, EgressDeniedError, make_network_policy
+from eurpe.security import EgressDeniedError, make_network_policy
 
 # TEST-NET-1 (RFC 5737) — guaranteed not to be a real reachable host,
 # so a probe against it is the cleanest "is the default-deny gate
@@ -135,7 +135,7 @@ def _smoke_egress_probe(config: EurpeConfig) -> bool:
 
     gate = make_network_policy(config)
     try:
-        decision = gate.check(
+        gate.check(
             host=_SMOKE_PROBE_HOST,
             port=_SMOKE_PROBE_PORT,
             scheme=_SMOKE_PROBE_SCHEME,
@@ -143,12 +143,11 @@ def _smoke_egress_probe(config: EurpeConfig) -> bool:
             source="smoke_probe",
         )
     except EgressDeniedError:
-        # The default and expected outcome — a deny means the gate is
-        # doing its job.
+        # Expected outcome — gate denied, contract holds.
         return True
-    # If we got a Decision back without raising, the gate let the
-    # probe through. That is a regression.
-    return decision is Decision.DENIED
+    # Returning at all (without an EgressDeniedError) means the gate
+    # allowed the TEST-NET probe — a security regression.
+    return False
 
 
 if __name__ == "__main__":
