@@ -30,6 +30,14 @@ from eurpe.ingestion.errors import (
 )
 from eurpe.ingestion.models import ParsedProposal, ParsedSection, ParsedTable
 
+# NOTE: IngestionService lives in eurpe.ingestion.service and is NOT
+# re-exported here. The service imports eurpe.retrieval, which imports
+# eurpe.ingestion.models — re-exporting at this level would create a
+# circular import. Callers should use
+# ``from eurpe.ingestion.service import IngestionService`` or the
+# top-level ``from eurpe import IngestionService`` which sequences the
+# imports correctly.
+
 __all__ = [
     "DoclingProposalParser",
     "IngestionError",
