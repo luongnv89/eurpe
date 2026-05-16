@@ -63,9 +63,7 @@ def test_ollama_embedder_consults_gate_before_httpx(
     class _ShouldNotBuild:
         def __init__(self, *_, **__) -> None:
             calls.append("Client.__init__")
-            raise AssertionError(
-                "httpx.Client must not be built when the gate denies"
-            )
+            raise AssertionError("httpx.Client must not be built when the gate denies")
 
     import httpx
 
@@ -132,9 +130,7 @@ def test_ollama_embedder_allows_allowlisted_host(
     audit_log: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     gate = NetworkPolicyGate(
-        allowlist=[
-            AllowlistEntry(host="example.com", port=443, reason="approved mirror")
-        ],
+        allowlist=[AllowlistEntry(host="example.com", port=443, reason="approved mirror")],
         audit_log_path=audit_log,
     )
 
@@ -243,9 +239,7 @@ def test_ollama_llm_consults_gate_before_httpx(
     class _ShouldNotBuild:
         def __init__(self, *_, **__) -> None:
             calls.append("Client.__init__")
-            raise AssertionError(
-                "httpx.Client must not be built when the gate denies"
-            )
+            raise AssertionError("httpx.Client must not be built when the gate denies")
 
     import httpx
 

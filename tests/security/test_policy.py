@@ -85,9 +85,7 @@ def test_loopback_allowed_without_allowlist(audit_log: Path) -> None:
 
 def test_localhost_string_allowed_without_allowlist(audit_log: Path) -> None:
     gate = NetworkPolicyGate(allowlist=[], audit_log_path=audit_log)
-    assert (
-        gate.check("localhost", 11434, "http", "/api/x", "test") is Decision.ALLOWED
-    )
+    assert gate.check("localhost", 11434, "http", "/api/x", "test") is Decision.ALLOWED
 
 
 def test_ipv6_loopback_allowed_without_allowlist(audit_log: Path) -> None:
@@ -120,9 +118,7 @@ def test_allowlist_match_is_case_insensitive(audit_log: Path) -> None:
         allowlist=[AllowlistEntry(host="example.com", port=443, reason="x")],
         audit_log_path=audit_log,
     )
-    assert (
-        gate.check("EXAMPLE.COM", 443, "https", "/", "test") is Decision.ALLOWED
-    )
+    assert gate.check("EXAMPLE.COM", 443, "https", "/", "test") is Decision.ALLOWED
 
 
 def test_allowlist_mismatch_port_denied(audit_log: Path) -> None:
@@ -177,9 +173,7 @@ def test_audit_log_written_for_denied_decision(audit_log: Path) -> None:
 
 def test_audit_log_records_allowlist_match_reason(audit_log: Path) -> None:
     gate = NetworkPolicyGate(
-        allowlist=[
-            AllowlistEntry(host="example.com", port=443, reason="approved mirror")
-        ],
+        allowlist=[AllowlistEntry(host="example.com", port=443, reason="approved mirror")],
         audit_log_path=audit_log,
     )
     gate.check("example.com", 443, "https", "/", "test")

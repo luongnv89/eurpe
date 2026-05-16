@@ -64,11 +64,7 @@ def test_redact_path_collapses_to_first_segment(raw: str, expected: str) -> None
 
 
 def _read_one(path: Path) -> dict:
-    lines = [
-        line
-        for line in path.read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    ]
+    lines = [line for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
     assert len(lines) == 1, f"expected exactly 1 line, got: {lines!r}"
     return json.loads(lines[0])
 
@@ -180,9 +176,7 @@ def test_log_attempt_does_not_propagate_to_root(tmp_path: Path, caplog) -> None:
             source="src",
         )
     # caplog captures records that propagate to root; audit must not.
-    propagated = [
-        r for r in caplog.records if r.name == _AUDIT_LOGGER_NAME
-    ]
+    propagated = [r for r in caplog.records if r.name == _AUDIT_LOGGER_NAME]
     assert propagated == []
 
 
