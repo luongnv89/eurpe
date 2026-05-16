@@ -69,8 +69,7 @@ class RetrievalQuery(BaseModel):
     enable_section_type_fallback: bool | None = Field(
         default=None,
         description=(
-            "Per-call override for the section_type fallback. ``None`` "
-            "inherits the policy default."
+            "Per-call override for the section_type fallback. ``None`` inherits the policy default."
         ),
     )
 
@@ -99,8 +98,7 @@ class RetrievalResponse(BaseModel):
     def _enforce_result_count_matches_results(self) -> Self:
         if self.result_count != len(self.results):
             raise ValueError(
-                f"result_count ({self.result_count}) must match len(results) "
-                f"({len(self.results)})."
+                f"result_count ({self.result_count}) must match len(results) ({len(self.results)})."
             )
         return self
 

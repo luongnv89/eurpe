@@ -110,9 +110,7 @@ def test_generation_service_propagates_llm_unavailable(tmp_path) -> None:
         )
 
 
-def test_generation_service_missing_profile_raises(
-    deterministic_workflow, monkeypatch
-) -> None:
+def test_generation_service_missing_profile_raises(deterministic_workflow, monkeypatch) -> None:
     """A programme with no bundled profile surfaces a load error to the caller.
 
     Forces the error by redirecting the service-module's

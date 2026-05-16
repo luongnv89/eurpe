@@ -82,9 +82,7 @@ def test_export_service_docx_format_is_unsupported() -> None:
 
     service = ExportService()
     with pytest.raises(UnsupportedExportFormatError):
-        service.export_section(
-            ExportRequest(draft=_make_draft(), format=ExportFormat.DOCX)
-        )
+        service.export_section(ExportRequest(draft=_make_draft(), format=ExportFormat.DOCX))
 
 
 def test_export_service_audit_failure_is_blocking() -> None:
@@ -110,9 +108,7 @@ def test_export_service_run_audit_false_returns_audit_none() -> None:
     """Opting out of the audit skips the badge check (synthetic-test escape hatch)."""
 
     service = ExportService()
-    result = service.export_section(
-        ExportRequest(draft=_make_draft(), run_audit=False)
-    )
+    result = service.export_section(ExportRequest(draft=_make_draft(), run_audit=False))
     assert result.audit_passed is None
 
 

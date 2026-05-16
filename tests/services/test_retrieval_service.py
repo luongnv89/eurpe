@@ -75,18 +75,14 @@ def retrieval_service(tmp_path) -> RetrievalService:
             _build_chunk(document_id="f2", chunk_index=0),
         ]
     )
-    retriever = SourceStatusAwareRetriever(
-        index, policy=RetrievalPolicy(relevance_threshold=0.0)
-    )
+    retriever = SourceStatusAwareRetriever(index, policy=RetrievalPolicy(relevance_threshold=0.0))
     return RetrievalService(retriever)
 
 
 def test_retrieval_service_returns_response_with_results(retrieval_service) -> None:
     """Happy path: query returns results and ``result_count`` matches."""
 
-    response = retrieval_service.query(
-        RetrievalQuery(query="methodology content", top_k=5)
-    )
+    response = retrieval_service.query(RetrievalQuery(query="methodology content", top_k=5))
     assert response.result_count == len(response.results)
     assert response.result_count >= 1
     # AC #2: each result carries its source-status label.
@@ -121,9 +117,7 @@ def test_retrieval_service_empty_index_returns_no_results(tmp_path) -> None:
         embedder=embedder,
         collection_name="retrieval_service_empty_index",
     )
-    retriever = SourceStatusAwareRetriever(
-        index, policy=RetrievalPolicy(relevance_threshold=0.0)
-    )
+    retriever = SourceStatusAwareRetriever(index, policy=RetrievalPolicy(relevance_threshold=0.0))
     service = RetrievalService(retriever)
     response = service.query(RetrievalQuery(query="anything", top_k=5))
     assert response.result_count == 0

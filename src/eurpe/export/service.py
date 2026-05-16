@@ -73,9 +73,7 @@ class ExportService:
                 "use ExportFormat.MARKDOWN for the MVP."
             )
         else:  # pragma: no cover - StrEnum guards against this
-            raise UnsupportedExportFormatError(
-                f"unsupported export format: {request.format!r}"
-            )
+            raise UnsupportedExportFormatError(f"unsupported export format: {request.format!r}")
 
         audit_passed: bool | None = None
         if request.run_audit:

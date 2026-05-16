@@ -112,13 +112,9 @@ class IngestionRequest(BaseModel):
         """
 
         if self.parsed is not None and self.pdf_path is not None:
-            raise ValueError(
-                "IngestionRequest must supply exactly one of `parsed` or `pdf_path`."
-            )
+            raise ValueError("IngestionRequest must supply exactly one of `parsed` or `pdf_path`.")
         if self.parsed is None and self.pdf_path is None:
-            raise ValueError(
-                "IngestionRequest must supply either `parsed` or `pdf_path`."
-            )
+            raise ValueError("IngestionRequest must supply either `parsed` or `pdf_path`.")
         return self
 
 
@@ -228,9 +224,7 @@ class IngestionService:
                 index=self._index,
             )
 
-        duplicate_reason = (
-            decision.reason if decision.action is not DuplicateAction.NONE else None
-        )
+        duplicate_reason = decision.reason if decision.action is not DuplicateAction.NONE else None
         return IngestionResult(
             chunks_added=chunks_added,
             duplicate_decision=decision.action,
@@ -258,9 +252,7 @@ class IngestionService:
                 "IngestionRequest.proposal.content_hash is missing and no "
                 "pdf_path was supplied to compute it."
             )
-        return proposal.model_copy(
-            update={"content_hash": compute_content_hash(request.pdf_path)}
-        )
+        return proposal.model_copy(update={"content_hash": compute_content_hash(request.pdf_path)})
 
     @staticmethod
     def _derive_document_id(request: IngestionRequest, parsed: ParsedProposal) -> str:
