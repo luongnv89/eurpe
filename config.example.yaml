@@ -23,5 +23,18 @@ models:
 # Block all outbound network access by default.
 offline_mode: true
 
+# Network egress allowlist. Default is empty: only loopback
+# (localhost, 127.0.0.1, ::1) is allowed. Each entry opens ONE
+# host:port pair. The `reason` field is copied verbatim into the
+# JSONL audit log at <runtime_dir>/network-audit.log so a future
+# reviewer can answer "why was this allowed?" without re-reading
+# this file. Example (commented):
+#
+# network_allowlist:
+#   - host: telemetry-mirror.example.org
+#     port: 443
+#     reason: "Internal CRD telemetry mirror approved 2025-10-01"
+network_allowlist: []
+
 # Logging verbosity: DEBUG | INFO | WARNING | ERROR
 log_level: INFO

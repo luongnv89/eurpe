@@ -17,6 +17,8 @@ from pathlib import Path
 import yaml
 from pydantic import BaseModel, Field, field_validator
 
+from eurpe.security.allowlist import AllowlistEntry
+
 # Repository root resolves to .../eu-research-projects (two parents up from this file:
 # src/eurpe/config.py -> src/eurpe -> src -> repo root).
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -61,6 +63,10 @@ class EurpeConfig(BaseModel):
     runtime_dir: Path = Field(default=Path("./data/runtime"))
     models: ModelsConfig = Field(default_factory=ModelsConfig)
     offline_mode: bool = Field(default=True)
+    # Default-deny network policy: loopback is always allowed; anything
+    # else must be opted in here. Empty list (the default) is the
+    # secure default. See ``eurpe.security.NetworkPolicyGate``.
+    network_allowlist: list[AllowlistEntry] = Field(default_factory=list)
     log_level: str = Field(default="INFO")
 
     @field_validator("log_level")
@@ -95,6 +101,17 @@ class EurpeConfig(BaseModel):
                 "runtime_dir": runtime,
             }
         )
+
+    def network_audit_log_path(self) -> Path:
+        """Path to the JSONL audit log for outbound network attempts.
+
+        Lives under ``runtime_dir`` because the log is short-lived
+        operational state (matches the rationale for staging uploads
+        and parse-token records). Wiping ``runtime_dir`` re-creates a
+        clean log on the next gate construction.
+        """
+
+        return self.runtime_dir / "network-audit.log"
 
 
 def ensure_config_file(
