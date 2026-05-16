@@ -357,3 +357,164 @@ def test_index_build_cli_rejects_missing_yaml(tmp_path: Path) -> None:
     )
     assert result.exit_code == 1
     assert "metadata file not found" in result.output
+
+
+# ---------------------------------------------------------------------------
+# Duplicate-detection CLI coverage (issue #11)
+# ---------------------------------------------------------------------------
+
+
+def _write_pdf_pair(tmp_path: Path, *, name: str, body_suffix: bytes) -> tuple[Path, Path]:
+    """Build a synthetic PDF plus its YAML sidecar with title/call pinned.
+
+    Returns ``(yaml_path, pdf_path)``. ``body_suffix`` is appended to the
+    canonical synthetic-PDF byte stream so two calls with different
+    suffixes produce different content hashes — exactly what the
+    soft-duplicate and reindex tests need.
+    """
+
+    pdf_path = tmp_path / name
+    _build_synthetic_pdf(pdf_path)
+    if body_suffix:
+        with pdf_path.open("ab") as fh:
+            # Append after %%EOF so docling still parses the original
+            # body; the suffix only changes the hash.
+            fh.write(b"\n")
+            fh.write(b"%% suffix: ")
+            fh.write(body_suffix)
+    yaml_path = pdf_path.with_suffix(".yaml")
+    _write_metadata_yaml(yaml_path, pdf_path)
+    return yaml_path, pdf_path
+
+
+@pytest.mark.docling
+def test_index_build_skips_hard_duplicate_batch_continues(tmp_path: Path) -> None:
+    """Two YAMLs pointing at byte-identical PDFs → 1 added, 1 skipped, exit 0."""
+
+    pytest.importorskip("reportlab")
+    cfg_path = _write_offline_config(tmp_path)
+
+    yaml_a, pdf_a = _write_pdf_pair(tmp_path, name="proposal_a.pdf", body_suffix=b"")
+    # The second YAML points at a separate PDF whose bytes match the first.
+    pdf_b = tmp_path / "proposal_b.pdf"
+    pdf_b.write_bytes(pdf_a.read_bytes())
+    yaml_b = pdf_b.with_suffix(".yaml")
+    _write_metadata_yaml(yaml_b, pdf_b)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "index",
+            "build",
+            str(yaml_a),
+            str(yaml_b),
+            "--config",
+            str(cfg_path),
+            "--collection",
+            "dup_hard",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert "1 added" in result.output
+    assert "1 skipped" in result.output
+    assert "duplicate skipped" in result.output
+
+
+@pytest.mark.docling
+def test_index_build_force_replaces_soft_duplicate(tmp_path: Path) -> None:
+    """``--force`` flips a soft duplicate from skip to reindex."""
+
+    pytest.importorskip("reportlab")
+    cfg_path = _write_offline_config(tmp_path)
+
+    yaml_a, _ = _write_pdf_pair(tmp_path, name="alpha.pdf", body_suffix=b"")
+    yaml_b, _ = _write_pdf_pair(tmp_path, name="beta.pdf", body_suffix=b"beta")
+
+    runner = CliRunner()
+    # Without --force: second YAML is skipped because the title + call_id
+    # collide (both pin "Synthetic Test Proposal" + HORIZON-CL5-2024-D3-02)
+    # but the bytes and stem differ.
+    result_first = runner.invoke(
+        app,
+        [
+            "index",
+            "build",
+            str(yaml_a),
+            str(yaml_b),
+            "--config",
+            str(cfg_path),
+            "--collection",
+            "dup_soft",
+        ],
+    )
+    assert result_first.exit_code == 0, result_first.output
+    assert "1 added" in result_first.output
+    assert "1 skipped" in result_first.output
+    assert "duplicate suspected" in result_first.output
+
+    # With --force: re-running the second YAML alone should reindex.
+    result_second = runner.invoke(
+        app,
+        [
+            "index",
+            "build",
+            str(yaml_b),
+            "--config",
+            str(cfg_path),
+            "--collection",
+            "dup_soft",
+            "--force",
+        ],
+    )
+    assert result_second.exit_code == 0, result_second.output
+    assert "1 reindexed" in result_second.output
+    assert "0 skipped" in result_second.output
+
+
+@pytest.mark.docling
+def test_index_build_auto_reindex_for_corrected_document(tmp_path: Path) -> None:
+    """Same PDF filename stem, different bytes → automatic REINDEX."""
+
+    pytest.importorskip("reportlab")
+    cfg_path = _write_offline_config(tmp_path)
+
+    yaml_a, pdf_a = _write_pdf_pair(tmp_path, name="corrigible.pdf", body_suffix=b"")
+    runner = CliRunner()
+    result_first = runner.invoke(
+        app,
+        [
+            "index",
+            "build",
+            str(yaml_a),
+            "--config",
+            str(cfg_path),
+            "--collection",
+            "dup_reindex",
+        ],
+    )
+    assert result_first.exit_code == 0, result_first.output
+    assert "1 added" in result_first.output
+
+    # Overwrite the PDF with a corrected version (different bytes, same
+    # filename). The YAML still points at the same PDF path so the
+    # document_id (PDF stem) collides — triggers REINDEX.
+    _build_synthetic_pdf(pdf_a)
+    with pdf_a.open("ab") as fh:
+        fh.write(b"\n%% correction\n")
+
+    result_second = runner.invoke(
+        app,
+        [
+            "index",
+            "build",
+            str(yaml_a),
+            "--config",
+            str(cfg_path),
+            "--collection",
+            "dup_reindex",
+        ],
+    )
+    assert result_second.exit_code == 0, result_second.output
+    assert "1 reindexed" in result_second.output
+    assert "0 skipped" in result_second.output

@@ -23,11 +23,18 @@ Validation rules guard the two invariants that matter most for EURPE:
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from eurpe.schema.enums import Programme, SectionType, SourceStatus
+
+# Pre-compiled so the per-record validator does not pay a regex compile
+# on every ``ProposalMetadata`` construction. Lowercase-only by design —
+# :func:`hashlib.sha256.hexdigest` already returns lowercase, so accepting
+# uppercase would only hide a bug where some caller hand-built the digest.
+_SHA256_HEX_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
 def _utc_now() -> datetime:
@@ -112,6 +119,32 @@ class ProposalMetadata(BaseModel):
         default_factory=_utc_now,
         description="When this metadata record was created (UTC).",
     )
+    content_hash: str | None = Field(
+        default=None,
+        description=(
+            "Lowercase sha256 hex digest of the source PDF bytes, when known. "
+            "Stamped by the ingestion layer once a PDF has been streamed; left "
+            "``None`` on records loaded from pre-feature fixtures or YAML "
+            "sidecars that pre-date the duplicate-detection feature."
+        ),
+    )
+
+    @field_validator("content_hash")
+    @classmethod
+    def _content_hash_well_formed(cls, value: str | None) -> str | None:
+        # Optional field — ``None`` means "unknown", which is how older
+        # records (and fixtures predating the dedup feature) round-trip.
+        # When a hash is supplied it must match the sha256 hexdigest shape
+        # exactly; anything else points at a caller bug (e.g., truncated
+        # digest, mixed-case input) and we surface it loudly rather than
+        # storing a hash that will never match a future ingest.
+        if value is None:
+            return value
+        if not _SHA256_HEX_RE.fullmatch(value):
+            raise ValueError(
+                f"content_hash must be a 64-character lowercase sha256 hex digest, got {value!r}"
+            )
+        return value
 
     @field_validator("call_id")
     @classmethod

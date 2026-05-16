@@ -269,6 +269,274 @@ def test_index_query_top_k_zero_raises(tmp_path: Path) -> None:
         index.query("anything", top_k=0)
 
 
+# ---------------------------------------------------------------------------
+# Duplicate-detection helpers and incremental-indexing regression
+# (issue #11 acceptance criteria a + c)
+# ---------------------------------------------------------------------------
+
+
+def _proposal_with_hash(
+    *,
+    content_hash: str,
+    proposal_title: str | None = None,
+    call_id: str = "HORIZON-CL5-2024-D3-02",
+    source_path: str = "data/corpus/sample.pdf",
+) -> ProposalMetadata:
+    """Compact :class:`ProposalMetadata` factory carrying ``content_hash``."""
+
+    return ProposalMetadata(
+        programme=Programme.HORIZON_EUROPE,
+        call_id=call_id,
+        year=2024,
+        outcome=SourceStatus.FUNDED,
+        proposal_title=proposal_title,
+        source_path=source_path,
+        content_hash=content_hash,
+    )
+
+
+def _named_chunk(proposal: ProposalMetadata, *, document_id: str, chunk_index: int) -> Chunk:
+    """Synthesise a chunk with a stable document_id and unique text."""
+
+    anchor = CitationAnchor(document_id=document_id)
+    meta = ChunkMetadata(
+        proposal=proposal,
+        chunk_index=chunk_index,
+        anchor=anchor,
+        source_status=proposal.outcome,
+    )
+    return Chunk(
+        text=f"chunk {chunk_index} for {document_id}: unique vocabulary tokens",
+        metadata=meta,
+    )
+
+
+def test_index_round_trip_preserves_content_hash() -> None:
+    """``content_hash`` survives the flatten + inflate round-trip."""
+
+    original = _full_chunk_metadata()
+    populated = original.model_copy(
+        update={"proposal": original.proposal.model_copy(update={"content_hash": "a" * 64})}
+    )
+    flat = _metadata_to_chroma(populated)
+    assert flat["proposal.content_hash"] == "a" * 64
+    reloaded = _chroma_to_metadata(dict(flat))
+    assert reloaded.proposal.content_hash == "a" * 64
+
+
+def test_index_round_trip_preserves_none_content_hash() -> None:
+    """When ``content_hash`` is None, the Chroma key is omitted on write."""
+
+    original = _minimal_chunk_metadata()
+    assert original.proposal.content_hash is None
+    flat = _metadata_to_chroma(original)
+    assert "proposal.content_hash" not in flat
+    reloaded = _chroma_to_metadata(dict(flat))
+    assert reloaded.proposal.content_hash is None
+
+
+def test_index_find_by_content_hash_returns_matching_document_ids(tmp_path: Path) -> None:
+    """Upsert two proposals with different hashes; finds the right doc_ids."""
+
+    embedder = DeterministicHashEmbedder(dimension=32)
+    index = ChromaIndex(index_path=tmp_path, embedder=embedder, collection_name="hash_lookup")
+    p_a = _proposal_with_hash(content_hash="a" * 64)
+    p_b = _proposal_with_hash(content_hash="b" * 64)
+    index.upsert(
+        [
+            _named_chunk(p_a, document_id="doc_a", chunk_index=0),
+            _named_chunk(p_a, document_id="doc_a", chunk_index=1),
+            _named_chunk(p_b, document_id="doc_b", chunk_index=0),
+        ]
+    )
+
+    assert index.find_by_content_hash("a" * 64) == ["doc_a"]
+    assert index.find_by_content_hash("b" * 64) == ["doc_b"]
+
+
+def test_index_find_by_content_hash_returns_empty_for_no_match(tmp_path: Path) -> None:
+    embedder = DeterministicHashEmbedder(dimension=32)
+    index = ChromaIndex(index_path=tmp_path, embedder=embedder, collection_name="hash_miss")
+    index.upsert(
+        [
+            _named_chunk(
+                _proposal_with_hash(content_hash="a" * 64),
+                document_id="doc_a",
+                chunk_index=0,
+            )
+        ]
+    )
+    assert index.find_by_content_hash("0" * 64) == []
+
+
+def test_index_find_by_title_and_call_skips_when_title_none(tmp_path: Path) -> None:
+    """Passing ``None`` for title short-circuits to ``[]`` without a query."""
+
+    embedder = DeterministicHashEmbedder(dimension=32)
+    index = ChromaIndex(index_path=tmp_path, embedder=embedder, collection_name="title_none")
+    proposal = _proposal_with_hash(content_hash="a" * 64, proposal_title=None)
+    index.upsert([_named_chunk(proposal, document_id="doc_a", chunk_index=0)])
+
+    assert index.find_by_title_and_call(None, "HORIZON-CL5-2024-D3-02") == []
+
+
+def test_index_delete_by_document_id_removes_only_matching_chunks(tmp_path: Path) -> None:
+    embedder = DeterministicHashEmbedder(dimension=32)
+    index = ChromaIndex(index_path=tmp_path, embedder=embedder, collection_name="delete_targeted")
+    p_a = _proposal_with_hash(content_hash="a" * 64)
+    p_b = _proposal_with_hash(content_hash="b" * 64)
+    index.upsert(
+        [
+            _named_chunk(p_a, document_id="doc_a", chunk_index=0),
+            _named_chunk(p_a, document_id="doc_a", chunk_index=1),
+            _named_chunk(p_b, document_id="doc_b", chunk_index=0),
+        ]
+    )
+    deleted = index.delete_by_document_id("doc_a")
+    assert deleted == 2
+    assert index.find_by_document_id("doc_a") == 0
+    # The other document's chunks remain intact.
+    assert index.find_by_document_id("doc_b") == 1
+    assert index.count() == 1
+
+
+def test_index_adding_new_proposal_preserves_existing_chunks_regression(
+    tmp_path: Path,
+) -> None:
+    """AC(a): a fresh proposal does not delete or replace existing chunks."""
+
+    embedder = DeterministicHashEmbedder(dimension=32)
+    index = ChromaIndex(index_path=tmp_path, embedder=embedder, collection_name="incremental")
+
+    p_a = _proposal_with_hash(content_hash="a" * 64, proposal_title="Alpha")
+    a_chunks = [
+        _named_chunk(p_a, document_id="doc_a", chunk_index=0),
+        _named_chunk(p_a, document_id="doc_a", chunk_index=1),
+    ]
+    index.upsert(a_chunks)
+    a_count = index.count()
+    assert a_count == 2
+
+    p_b = _proposal_with_hash(content_hash="b" * 64, proposal_title="Beta")
+    b_chunks = [
+        _named_chunk(p_b, document_id="doc_b", chunk_index=0),
+        _named_chunk(p_b, document_id="doc_b", chunk_index=1),
+        _named_chunk(p_b, document_id="doc_b", chunk_index=2),
+    ]
+    index.upsert(b_chunks)
+
+    # AC(a): A's chunks survived B's upsert.
+    assert index.find_by_document_id("doc_a") == 2
+    assert index.find_by_document_id("doc_b") == 3
+    assert index.count() == a_count + 3
+    # And a hash lookup for A still resolves.
+    assert index.find_by_content_hash("a" * 64) == ["doc_a"]
+
+
+def test_index_reindex_with_fewer_chunks_leaves_no_orphans(tmp_path: Path) -> None:
+    """Reindex (delete-then-upsert) shrinks ``find_by_document_id`` to the new count.
+
+    Pins AC(c): a corrected document with fewer chunks must not leave
+    stale higher-indexed chunks behind. ``ChromaIndex.upsert`` alone
+    would replace matching chunk_ids but the trailing chunks from the
+    previous version would survive — :meth:`delete_by_document_id` is
+    why that does not happen.
+    """
+
+    embedder = DeterministicHashEmbedder(dimension=32)
+    index = ChromaIndex(index_path=tmp_path, embedder=embedder, collection_name="reindex")
+    initial = _proposal_with_hash(content_hash="a" * 64, proposal_title="Original")
+    initial_chunks = [_named_chunk(initial, document_id="doc_x", chunk_index=i) for i in range(5)]
+    index.upsert(initial_chunks)
+    assert index.find_by_document_id("doc_x") == 5
+
+    # Re-index with a corrected (smaller) version.
+    index.delete_by_document_id("doc_x")
+    corrected = _proposal_with_hash(content_hash="b" * 64, proposal_title="Original")
+    corrected_chunks = [
+        _named_chunk(corrected, document_id="doc_x", chunk_index=i) for i in range(3)
+    ]
+    index.upsert(corrected_chunks)
+
+    assert index.find_by_document_id("doc_x") == 3
+    # Stored hash now points at the corrected bytes.
+    assert index.find_by_content_hash("b" * 64) == ["doc_x"]
+    assert index.find_by_content_hash("a" * 64) == []
+
+
+def test_reindex_proposal_loses_old_chunks_on_upsert_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Pin the documented non-atomic-reindex contract.
+
+    ``reindex_proposal`` deletes the old chunks before chunking and
+    upserting the new ones. If ``index.upsert`` raises (transient Chroma
+    failure, embedder error), the old chunks are gone and nothing
+    replaces them — the operator sees a 500 and the document_id is empty
+    in the index. The PR's known-follow-up bullet documents this; this
+    test makes the data-loss window visible to CI so a future atomic
+    rewrite can flip the assertion instead of inheriting silent breakage.
+    """
+
+    from unittest.mock import patch
+
+    from eurpe.ingestion.models import ParsedProposal, ParsedSection
+    from eurpe.retrieval.chunker import HierarchicalChunker
+    from eurpe.retrieval.errors import IndexingError
+    from eurpe.retrieval.pipeline import reindex_proposal
+
+    embedder = DeterministicHashEmbedder(dimension=32)
+    index = ChromaIndex(index_path=tmp_path, embedder=embedder, collection_name="reindex_fail")
+    initial = _proposal_with_hash(content_hash="a" * 64, proposal_title="Original")
+    initial_chunks = [_named_chunk(initial, document_id="doc_x", chunk_index=i) for i in range(3)]
+    index.upsert(initial_chunks)
+    assert index.find_by_document_id("doc_x") == 3
+
+    parsed = ParsedProposal(
+        source_path="/abs/doc_x.pdf",
+        title="Original",
+        sections=[
+            ParsedSection(
+                heading="1.1 Excellence",
+                level=1,
+                text="Replacement body content. " * 10,
+                page_start=1,
+                page_end=1,
+            )
+        ],
+        page_count=1,
+    )
+    corrected = _proposal_with_hash(content_hash="b" * 64, proposal_title="Original")
+    chunker = HierarchicalChunker(target_chars=200, overlap_chars=50, min_chunk_chars=30)
+
+    # Inject an upsert failure between the delete and the re-upsert.
+    original_upsert = index.upsert
+
+    def _failing_upsert(chunks: list[Chunk]) -> None:
+        raise IndexingError("simulated Chroma write failure mid-reindex")
+
+    with patch.object(index, "upsert", side_effect=_failing_upsert):
+        with pytest.raises(IndexingError):
+            reindex_proposal(
+                parsed,
+                corrected,
+                chunker=chunker,
+                index=index,
+                replaced_document_id="doc_x",
+            )
+
+    # Restore the real upsert for the post-failure assertions.
+    index.upsert = original_upsert  # type: ignore[method-assign]
+
+    # Documented contract: the old chunks are gone, the new ones never
+    # landed, the document_id is empty. If a future atomic rewrite makes
+    # this go to 3 instead of 0, flip the assertion and remove the
+    # known-follow-up bullet from the PR body.
+    assert index.find_by_document_id("doc_x") == 0
+    assert index.find_by_content_hash("a" * 64) == []
+    assert index.find_by_content_hash("b" * 64) == []
+
+
 def test_index_full_offline_flow(tmp_path: Path, no_network: None) -> None:
     """The complete chunk → embed → upsert → query path runs without network.
 

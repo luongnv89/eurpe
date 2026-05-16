@@ -41,10 +41,20 @@ class _StubParser:
     full real chunker + index path without dragging Docling (and the
     ~40 MB OCR weights it tries to download by default in non-offline
     mode) into the test suite.
+
+    ``flavour`` is a marker word baked into the section text so a test
+    can drive the chunker to produce different chunk_ids on a second
+    call (used by the corrected-document reindex test).
     """
 
-    def __init__(self, *, title: str = "Synthetic Test Proposal") -> None:
+    def __init__(
+        self,
+        *,
+        title: str = "Synthetic Test Proposal",
+        flavour: str = "default",
+    ) -> None:
         self._title = title
+        self._flavour = flavour
 
     def parse(self, path: Path) -> ParsedProposal:
         return ParsedProposal(
@@ -55,7 +65,7 @@ class _StubParser:
                     heading="1. Excellence",
                     level=1,
                     text=(
-                        "Excellence body text describing the proposal scientific ambition. "
+                        f"Excellence body text in flavour {self._flavour}. "
                         "It includes a methodology paragraph that the chunker can split. "
                         "Long enough to exercise the chunker's overlap logic without depending "
                         "on Docling."
@@ -67,7 +77,7 @@ class _StubParser:
                     heading="2. Impact",
                     level=1,
                     text=(
-                        "Impact narrative for downstream commercialisation. "
+                        f"Impact narrative in flavour {self._flavour}. "
                         "Adds a second section so the chunker emits more than one chunk."
                     ),
                     page_start=2,
@@ -335,3 +345,184 @@ def test_health_endpoint_still_serves(configured_app: TestClient) -> None:
     response = configured_app.get("/health")
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
+
+
+# ---------------------------------------------------------------------------
+# Duplicate-detection coverage (issue #11)
+# ---------------------------------------------------------------------------
+
+
+def _parse_and_confirm(
+    client: TestClient,
+    *,
+    filename: str,
+    body: bytes,
+    confirm_extra: dict | None = None,
+) -> tuple[int, dict]:
+    """Drive the parse → confirm round trip and return ``(status, body)``.
+
+    Keeps the call sites readable: the dedup tests below all run the
+    same shape of request and differ only in the bytes / metadata.
+    """
+
+    files = {"file": (filename, body, "application/pdf")}
+    parse_response = client.post("/api/ingestion/parse", files=files)
+    assert parse_response.status_code == 200, parse_response.text
+    parse_token = parse_response.json()["parse_token"]
+
+    confirm_body: dict = {
+        "parse_token": parse_token,
+        "programme": Programme.HORIZON_EUROPE.value,
+        "call_id": "HORIZON-CL5-2024-D3-02",
+        "topic_id": "HORIZON-CL5-2024-D3-02-01",
+        "year": 2024,
+        "outcome": SourceStatus.FUNDED.value,
+        "proposal_title": "Synthetic Test Proposal",
+        "consortium_acronym": "STP",
+    }
+    if confirm_extra:
+        confirm_body.update(confirm_extra)
+    confirm_response = client.post("/api/ingestion/confirm", json=confirm_body)
+    return confirm_response.status_code, (
+        confirm_response.json() if confirm_response.content else {}
+    )
+
+
+def test_confirm_blocks_hard_duplicate_with_409(configured_app: TestClient) -> None:
+    """A second confirm with byte-identical content is rejected with 409."""
+
+    body = _make_pdf_bytes()
+    status_a, response_a = _parse_and_confirm(
+        configured_app, filename="HORIZON-CL5-2024-D3-02-883588.pdf", body=body
+    )
+    assert status_a == 200, response_a
+    assert response_a["duplicate_warning"] is None
+    assert response_a["replaced_document_id"] is None
+
+    status_b, response_b = _parse_and_confirm(
+        configured_app, filename="HORIZON-CL5-2024-D3-02-883588.pdf", body=body
+    )
+    assert status_b == 409, response_b
+    detail = response_b["detail"].lower()
+    assert "duplicate" in detail
+
+
+def test_confirm_reindexes_corrected_document_no_orphans(
+    configured_app: TestClient, tmp_path: Path
+) -> None:
+    """A corrected PDF under the same filename reindexes without orphans.
+
+    The stub parser is rebound mid-test so the second ingest emits
+    different chunk text (so the chunker produces different chunk_ids)
+    and the test can prove the index ends up with the corrected
+    chunk count.
+    """
+
+    from eurpe.api import dependencies as deps
+
+    app.dependency_overrides[deps.get_parser] = lambda: _StubParser(flavour="original")
+    status_a, response_a = _parse_and_confirm(
+        configured_app,
+        filename="HORIZON-CL5-2024-D3-02-883588.pdf",
+        body=_make_pdf_bytes(),
+    )
+    assert status_a == 200, response_a
+    original_chunks = response_a["chunks_added"]
+    assert original_chunks > 0
+
+    # Rebind the parser to emit different chunk text, and use different
+    # bytes so the hash differs (otherwise BLOCK_HARD short-circuits).
+    app.dependency_overrides[deps.get_parser] = lambda: _StubParser(flavour="corrected")
+    status_b, response_b = _parse_and_confirm(
+        configured_app,
+        filename="HORIZON-CL5-2024-D3-02-883588.pdf",
+        body=_make_pdf_bytes() + b"corrected",
+    )
+    assert status_b == 200, response_b
+    # REINDEX path: the old doc_id was replaced.
+    assert response_b["replaced_document_id"] is not None
+    # Silent for REINDEX (operator intent is unambiguous).
+    assert response_b["duplicate_warning"] is None
+
+    # Verify the index now holds exactly the new chunks for that doc_id —
+    # no orphans from the original ingest.
+    index = deps.get_index(deps.get_config(), collection="default")
+    doc_id = response_b["replaced_document_id"]
+    assert index.find_by_document_id(doc_id) == response_b["chunks_added"]
+
+
+def test_confirm_blocks_soft_duplicate_without_force(
+    configured_app: TestClient,
+) -> None:
+    """Same title+call_id but different bytes and different filename → 409."""
+
+    body_a = _make_pdf_bytes()
+    status_a, _ = _parse_and_confirm(
+        configured_app, filename="HORIZON-CL5-2024-D3-02-aaaaaa.pdf", body=body_a
+    )
+    assert status_a == 200
+
+    # Different filename → different document_id; different bytes → different hash.
+    status_b, response_b = _parse_and_confirm(
+        configured_app,
+        filename="HORIZON-CL5-2024-D3-02-bbbbbb.pdf",
+        body=body_a + b"different",
+    )
+    assert status_b == 409, response_b
+    detail = response_b["detail"].lower()
+    assert "duplicate suspected" in detail
+    assert "force=true" in detail
+
+
+def test_confirm_replaces_soft_duplicate_with_force_true(
+    configured_app: TestClient,
+) -> None:
+    """``force=true`` allows the soft-duplicate path to replace the existing record."""
+
+    body_a = _make_pdf_bytes()
+    status_a, _ = _parse_and_confirm(
+        configured_app,
+        filename="HORIZON-CL5-2024-D3-02-aaaaaa.pdf",
+        body=body_a,
+    )
+    assert status_a == 200
+
+    status_b, response_b = _parse_and_confirm(
+        configured_app,
+        filename="HORIZON-CL5-2024-D3-02-bbbbbb.pdf",
+        body=body_a + b"different",
+        confirm_extra={"force": True},
+    )
+    assert status_b == 200, response_b
+    assert response_b["duplicate_warning"] is not None
+    assert response_b["replaced_document_id"] is not None
+
+
+def test_confirm_does_not_archive_when_blocked(
+    configured_app: TestClient,
+) -> None:
+    """A 409 hard-duplicate response must not leave a second archive on disk."""
+
+    body = _make_pdf_bytes()
+    status_a, response_a = _parse_and_confirm(
+        configured_app,
+        filename="HORIZON-CL5-2024-D3-02-883588.pdf",
+        body=body,
+    )
+    assert status_a == 200, response_a
+    archived_path = Path(response_a["sidecar_path"]).with_suffix("")
+    # ``sidecar_path`` ends in ``.metadata.yaml``; strip both suffixes to
+    # find the archive PDF directory.
+    archive_dir = archived_path.parent
+    before_count = sum(1 for _ in archive_dir.glob("*.pdf"))
+    assert before_count >= 1
+
+    status_b, _ = _parse_and_confirm(
+        configured_app,
+        filename="HORIZON-CL5-2024-D3-02-883588.pdf",
+        body=body,
+    )
+    assert status_b == 409
+    after_count = sum(1 for _ in archive_dir.glob("*.pdf"))
+    # The blocked second confirm did not produce a second archived PDF.
+    assert after_count == before_count
