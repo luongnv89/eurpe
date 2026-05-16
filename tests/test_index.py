@@ -464,6 +464,79 @@ def test_index_reindex_with_fewer_chunks_leaves_no_orphans(tmp_path: Path) -> No
     assert index.find_by_content_hash("a" * 64) == []
 
 
+def test_reindex_proposal_loses_old_chunks_on_upsert_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Pin the documented non-atomic-reindex contract.
+
+    ``reindex_proposal`` deletes the old chunks before chunking and
+    upserting the new ones. If ``index.upsert`` raises (transient Chroma
+    failure, embedder error), the old chunks are gone and nothing
+    replaces them — the operator sees a 500 and the document_id is empty
+    in the index. The PR's known-follow-up bullet documents this; this
+    test makes the data-loss window visible to CI so a future atomic
+    rewrite can flip the assertion instead of inheriting silent breakage.
+    """
+
+    from unittest.mock import patch
+
+    from eurpe.ingestion.models import ParsedProposal, ParsedSection
+    from eurpe.retrieval.chunker import HierarchicalChunker
+    from eurpe.retrieval.errors import IndexingError
+    from eurpe.retrieval.pipeline import reindex_proposal
+
+    embedder = DeterministicHashEmbedder(dimension=32)
+    index = ChromaIndex(index_path=tmp_path, embedder=embedder, collection_name="reindex_fail")
+    initial = _proposal_with_hash(content_hash="a" * 64, proposal_title="Original")
+    initial_chunks = [_named_chunk(initial, document_id="doc_x", chunk_index=i) for i in range(3)]
+    index.upsert(initial_chunks)
+    assert index.find_by_document_id("doc_x") == 3
+
+    parsed = ParsedProposal(
+        source_path="/abs/doc_x.pdf",
+        title="Original",
+        sections=[
+            ParsedSection(
+                heading="1.1 Excellence",
+                level=1,
+                text="Replacement body content. " * 10,
+                page_start=1,
+                page_end=1,
+            )
+        ],
+        page_count=1,
+    )
+    corrected = _proposal_with_hash(content_hash="b" * 64, proposal_title="Original")
+    chunker = HierarchicalChunker(target_chars=200, overlap_chars=50, min_chunk_chars=30)
+
+    # Inject an upsert failure between the delete and the re-upsert.
+    original_upsert = index.upsert
+
+    def _failing_upsert(chunks: list[Chunk]) -> None:
+        raise IndexingError("simulated Chroma write failure mid-reindex")
+
+    with patch.object(index, "upsert", side_effect=_failing_upsert):
+        with pytest.raises(IndexingError):
+            reindex_proposal(
+                parsed,
+                corrected,
+                chunker=chunker,
+                index=index,
+                replaced_document_id="doc_x",
+            )
+
+    # Restore the real upsert for the post-failure assertions.
+    index.upsert = original_upsert  # type: ignore[method-assign]
+
+    # Documented contract: the old chunks are gone, the new ones never
+    # landed, the document_id is empty. If a future atomic rewrite makes
+    # this go to 3 instead of 0, flip the assertion and remove the
+    # known-follow-up bullet from the PR body.
+    assert index.find_by_document_id("doc_x") == 0
+    assert index.find_by_content_hash("a" * 64) == []
+    assert index.find_by_content_hash("b" * 64) == []
+
+
 def test_index_full_offline_flow(tmp_path: Path, no_network: None) -> None:
     """The complete chunk → embed → upsert → query path runs without network.
 

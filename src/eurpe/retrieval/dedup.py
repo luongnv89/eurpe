@@ -10,9 +10,9 @@ consistent.
 Three cases are recognised, encoded in :class:`DuplicateAction`:
 
 * ``BLOCK_HARD`` — the incoming PDF is byte-identical to one already in
-  the index. Re-ingesting it would do nothing useful. Both callers
-  surface a hard error (HTTP 409, CLI skip + exit non-zero in batch
-  context).
+  the index. Re-ingesting it would do nothing useful. The HTTP route
+  surfaces a 409; the CLI logs a skip line to stderr, continues the
+  batch, and exits 0 (the per-bucket summary reports the skip count).
 * ``REINDEX`` — the incoming PDF has a different hash but its archive
   filename (``document_id``) already exists. This is the
   corrected-version case: the operator dropped in an updated PDF under

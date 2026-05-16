@@ -226,3 +226,41 @@ def test_evaluate_duplicate_block_soft_skipped_when_incoming_title_is_none(
         new_document_id="title_less_new",
     )
     assert decision.action is DuplicateAction.NONE
+
+
+def test_evaluate_duplicate_block_soft_with_multiple_existing_matches(
+    index: ChromaIndex,
+) -> None:
+    """Two existing records share (title, call_id) — soft-block picks one of them.
+
+    Pins the contract that when ``find_by_title_and_call`` returns more
+    than one stem (e.g., after a partial CLI ingest left two records under
+    the same title), the reported ``conflicting_document_id`` is one of
+    the real existing stems and never empty. The current implementation
+    picks ``other_matches[0]``; this test does not pin which one wins
+    (Chroma row order is unspecified), only that the value is a valid
+    pre-populated stem and the reason string references it.
+    """
+
+    title = "Shared Title Across Two Records"
+    call = "HORIZON-CL5-2024-D3-02"
+    proposal_a = _proposal(content_hash="a" * 64, proposal_title=title, call_id=call)
+    proposal_b = _proposal(content_hash="b" * 64, proposal_title=title, call_id=call)
+    index.upsert(
+        [
+            _chunk(proposal_a, document_id="existing_stem_one"),
+            _chunk(proposal_b, document_id="existing_stem_two"),
+        ]
+    )
+
+    decision = evaluate_duplicate(
+        index=index,
+        content_hash="c" * 64,
+        proposal_title=title,
+        call_id=call,
+        new_document_id="fresh_incoming_stem",
+    )
+    assert decision.action is DuplicateAction.BLOCK_SOFT
+    assert decision.conflicting_document_id in {"existing_stem_one", "existing_stem_two"}
+    assert decision.conflicting_document_id is not None
+    assert decision.conflicting_document_id in decision.reason

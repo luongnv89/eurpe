@@ -503,8 +503,6 @@ def test_confirm_does_not_archive_when_blocked(
 ) -> None:
     """A 409 hard-duplicate response must not leave a second archive on disk."""
 
-    from eurpe.api import dependencies as deps
-
     body = _make_pdf_bytes()
     status_a, response_a = _parse_and_confirm(
         configured_app,
@@ -528,4 +526,3 @@ def test_confirm_does_not_archive_when_blocked(
     after_count = sum(1 for _ in archive_dir.glob("*.pdf"))
     # The blocked second confirm did not produce a second archived PDF.
     assert after_count == before_count
-    del deps  # appease the unused-import linter; the import is for the side-effect free path.
