@@ -51,8 +51,16 @@ from __future__ import annotations
 
 import logging
 import re
+import time
+from collections import Counter
 from typing import TYPE_CHECKING
 
+from eurpe.analytics import (
+    AnalyticsLogger,
+    DraftCompletedEvent,
+    DraftStartedEvent,
+    EventType,
+)
 from eurpe.generation.errors import GenerationError
 from eurpe.generation.llm import LLMClient
 from eurpe.generation.models import CitationRef, GenerationDraft, GenerationRequest
@@ -112,6 +120,7 @@ class SectionGenerationWorkflow:
         retriever: SourceStatusAwareRetriever,
         llm: LLMClient,
         prompt_builder: SectionPromptBuilder | None = None,
+        analytics: AnalyticsLogger | None = None,
     ) -> None:
         self._retriever = retriever
         self._llm = llm
@@ -120,6 +129,13 @@ class SectionGenerationWorkflow:
         # programme- or tenant-specific builder without forcing every
         # call site to construct one.
         self._prompt_builder = prompt_builder or SectionPromptBuilder()
+        # ``analytics`` is optional so tests can build workflows without
+        # touching the analytics log. When set, the workflow emits
+        # :class:`DraftStartedEvent` + :class:`DraftCompletedEvent`
+        # around each ``run()``. Emission is wrapped in try/except so a
+        # downstream analytics failure cannot break drafting (the
+        # workflow's primary contract is to produce a draft).
+        self._analytics = analytics
 
     @property
     def llm(self) -> LLMClient:
@@ -169,10 +185,22 @@ class SectionGenerationWorkflow:
           from the LLM client when the daemon is unreachable.
         """
 
+        start_time_ns = time.monotonic_ns()
+        self._emit_draft_started(request, profile=profile)
+
         results = self._retrieve(request)
         prompt, citations = self._build_prompt(request, results, profile=profile)
         text = self._generate(prompt)
         self._validate_citations(text=text, citations=citations)
+
+        generation_time_ms = (time.monotonic_ns() - start_time_ns) // 1_000_000
+        self._emit_draft_completed(
+            request,
+            citations=citations,
+            generation_time_ms=generation_time_ms,
+            profile=profile,
+        )
+
         return GenerationDraft(
             section_type=request.section_type,
             text=text,
@@ -270,4 +298,87 @@ class SectionGenerationWorkflow:
                 f"Generated draft references hallucinated citation [{first}] "
                 f"(only [1]..[{len(citations)}] are valid). "
                 f"All hallucinated markers: {sorted(set(invalid))}."
+            )
+
+    # ------------------------------------------------------------------
+    # Analytics emission — optional, never breaks drafting on failure
+    # ------------------------------------------------------------------
+
+    def _emit_draft_started(
+        self,
+        request: GenerationRequest,
+        *,
+        profile: DraftingProfile | None,
+    ) -> None:
+        """Emit a :class:`DraftStartedEvent` if an analytics logger is configured.
+
+        Content-safe by construction: the event takes the request's
+        operational knobs (section type, top-k, profile name) but
+        NEVER the user-intent text or the topic-context body. The
+        ``topic_context_present`` flag is the only signal carried.
+
+        Wrapped in ``try/except`` so a transient analytics failure
+        (full disk, permission error) cannot break drafting — the
+        workflow's primary contract is to return a draft.
+        """
+
+        if self._analytics is None:
+            return
+        try:
+            event = DraftStartedEvent(
+                event_type=EventType.DRAFT_STARTED,
+                section_type=request.section_type.value,
+                target_programme=(
+                    request.target_programme.value if request.target_programme is not None else None
+                ),
+                top_k_examples=request.top_k_examples,
+                lessons_learned=request.lessons_learned,
+                model=self._llm.model,
+                drafting_profile=profile.name if profile is not None else None,
+                topic_context_present=request.topic_context is not None,
+            )
+            self._analytics.log(event)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning(
+                "Failed to emit DraftStartedEvent (analytics logging is best-effort): %s",
+                exc,
+            )
+
+    def _emit_draft_completed(
+        self,
+        request: GenerationRequest,
+        *,
+        citations: list[CitationRef],
+        generation_time_ms: int,
+        profile: DraftingProfile | None,
+    ) -> None:
+        """Emit a :class:`DraftCompletedEvent` if an analytics logger is configured.
+
+        ``source_status_mix`` is built from the citation list as a
+        plain string-keyed dict — content-free, only the counts of
+        each ``SourceStatus`` label. The draft text and citation
+        snippets are NEVER passed to the event.
+
+        Wrapped in ``try/except`` so an analytics failure here cannot
+        break the workflow returning its draft to the caller.
+        """
+
+        if self._analytics is None:
+            return
+        try:
+            mix = Counter(c.source_status.value for c in citations)
+            event = DraftCompletedEvent(
+                event_type=EventType.DRAFT_COMPLETED,
+                section_type=request.section_type.value,
+                generation_time_ms=int(generation_time_ms),
+                citation_count=len(citations),
+                source_status_mix=dict(mix),
+                model=self._llm.model,
+                drafting_profile=profile.name if profile is not None else None,
+            )
+            self._analytics.log(event)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning(
+                "Failed to emit DraftCompletedEvent (analytics logging is best-effort): %s",
+                exc,
             )

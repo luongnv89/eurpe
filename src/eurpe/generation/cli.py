@@ -39,6 +39,7 @@ from pathlib import Path
 
 import typer
 
+from eurpe.analytics import EventType, ExportEvent, make_analytics_logger
 from eurpe.config import (
     DEFAULT_CONFIG_PATH,
     EXAMPLE_CONFIG_PATH,
@@ -390,8 +391,14 @@ def section(
     )
     retriever = SourceStatusAwareRetriever(index, policy=policy)
 
+    # Analytics is wired here so the workflow emits draft start /
+    # complete events for every CLI-driven run; the logger lives under
+    # ``runtime_dir`` and never leaves it unless the user explicitly
+    # runs ``eurpe analytics export``.
+    analytics = make_analytics_logger(cfg)
+
     llm = make_llm_client(cfg)
-    workflow = SectionGenerationWorkflow(retriever=retriever, llm=llm)
+    workflow = SectionGenerationWorkflow(retriever=retriever, llm=llm, analytics=analytics)
 
     # Resolve optional file-backed --context value. Failures here
     # surface as a clean BadParameter from the helper (Typer turns it
@@ -489,6 +496,20 @@ def section(
             _atomic_write(path, content)
             typer.echo("")
             typer.echo(f"  wrote {kind:8s}: {path}")
+            # Record an ExportEvent for each artefact actually written.
+            # Wrapped in try/except so an analytics failure cannot block
+            # the user from getting their draft on disk.
+            try:
+                analytics.log(
+                    ExportEvent(
+                        event_type=EventType.EXPORT,
+                        kind=kind,
+                        byte_count=len(content.encode("utf-8")),
+                        section_type=section_enum.value,
+                    )
+                )
+            except Exception:  # pragma: no cover - analytics failures must not break export
+                pass
 
     sys.stdout.flush()
     raise typer.Exit(code=0)

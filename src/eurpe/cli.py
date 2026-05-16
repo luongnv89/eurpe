@@ -12,6 +12,7 @@ from pathlib import Path
 import typer
 
 from eurpe import __version__
+from eurpe.analytics.cli import analytics_app
 from eurpe.config import (
     DEFAULT_CONFIG_PATH,
     EXAMPLE_CONFIG_PATH,
@@ -58,6 +59,12 @@ app.add_typer(index_app, name="index")
 # sub-actions (e.g., ``generate full-proposal``) can land without
 # touching the top-level CLI bootstrap.
 app.add_typer(generate_app, name="generate")
+
+# ``eurpe analytics export`` lives in the analytics package — same
+# pattern as ``index`` / ``generate``. The sub-Typer is the ONLY code
+# path that copies the analytics JSONL log outside the runtime
+# directory (issue #13 AC3).
+app.add_typer(analytics_app, name="analytics")
 
 
 @app.command()
