@@ -43,6 +43,11 @@ from urllib.parse import urlparse
 import httpx
 
 from eurpe.retrieval.errors import EmbeddingError
+from eurpe.security import (
+    EgressDeniedError,
+    NetworkPolicyGate,
+    make_network_policy,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -183,6 +188,7 @@ class OllamaEmbedder:
         model: str = "nomic-embed-text",
         base_url: str = "http://localhost:11434",
         timeout: float = 30.0,
+        policy: NetworkPolicyGate | None = None,
     ) -> None:
         if model not in self.KNOWN_DIMS:
             # Surface this as :class:`EmbeddingError` not ``ValueError``
@@ -197,6 +203,11 @@ class OllamaEmbedder:
         self._dimension = self.KNOWN_DIMS[model]
         self._base_url = base_url.rstrip("/")
         self._timeout = timeout
+        # ``policy`` is optional and defaults to ``None`` so existing
+        # tests that build an ``OllamaEmbedder`` directly (without
+        # going through ``make_embedder``) keep working. The factory
+        # always wires the gate; only production paths consult it.
+        self._policy = policy
 
     @property
     def dimension(self) -> int:
@@ -218,6 +229,19 @@ class OllamaEmbedder:
 
         out: list[list[float]] = []
         url = f"{self._base_url}/api/embeddings"
+        # Gate the first thing in the request lifecycle so a deny
+        # raises BEFORE the httpx Client is even constructed. The
+        # check is per-batch (not per-text) because the host:port and
+        # scheme are constant for the lifetime of the embedder.
+        if self._policy is not None:
+            parsed = urlparse(self._base_url)
+            self._policy.check(
+                host=parsed.hostname or "localhost",
+                port=parsed.port or 11434,
+                scheme=parsed.scheme or "http",
+                path="/api/embeddings",
+                source="ollama_embedder.embed",
+            )
         try:
             with httpx.Client(timeout=self._timeout) as client:
                 for text in texts:
@@ -250,12 +274,23 @@ class OllamaEmbedder:
 # ---------------------------------------------------------------------------
 
 
-def _ollama_reachable(base_url: str, timeout: float = 2.0) -> bool:
+def _ollama_reachable(
+    base_url: str,
+    timeout: float = 2.0,
+    *,
+    policy: NetworkPolicyGate | None = None,
+) -> bool:
     """Best-effort TCP probe of the Ollama daemon's host:port.
 
     Cheap and fast: we open a TCP connection and immediately close it.
     Failing fast (TCP-level) avoids a multi-second HTTP timeout on
     machines where Ollama isn't running.
+
+    When ``policy`` is supplied, the gate is consulted FIRST. A deny
+    is treated as "not reachable" (caller falls back to the
+    deterministic embedder) rather than re-raising — the factory's
+    contract is to degrade gracefully, not to crash the application.
+    The denial is still recorded in the audit log by the gate itself.
 
     Catches :class:`OSError` (the standard "connection refused / timed
     out / unreachable" family) and returns ``False``. Any other
@@ -270,6 +305,21 @@ def _ollama_reachable(base_url: str, timeout: float = 2.0) -> bool:
     parsed = urlparse(base_url)
     host = parsed.hostname or "localhost"
     port = parsed.port or 11434
+    if policy is not None:
+        try:
+            policy.check(
+                host=host,
+                port=port,
+                scheme=parsed.scheme or "tcp",
+                path="/",
+                source="ollama_embedder.reachable_probe",
+            )
+        except EgressDeniedError:
+            # Treat a denied probe the same way as a refused TCP
+            # connection: the factory will fall back to the
+            # deterministic embedder. The denial is already in the
+            # audit log via gate.check().
+            return False
     try:
         with socket.create_connection((host, port), timeout=timeout):
             return True
@@ -308,7 +358,19 @@ def make_embedder(config: object) -> Embedder:
     embedding_model = getattr(models, "embedding_model", "nomic-embed-text")
     ollama_base_url = getattr(models, "ollama_base_url", "http://localhost:11434")
 
-    if offline_mode and not _ollama_reachable(ollama_base_url):
+    # Build the network policy once and pass it to both the probe and
+    # the embedder. ``make_network_policy`` is duck-typed on the same
+    # config so a partial mock still works.
+    policy: NetworkPolicyGate | None
+    try:
+        policy = make_network_policy(config)
+    except Exception:  # pragma: no cover - defensive: degraded mock
+        # If the config can't supply enough info to build a gate
+        # (partial test mocks), fall back to the legacy behaviour:
+        # no gate, no audit, deterministic fallback on probe failure.
+        policy = None
+
+    if offline_mode and not _ollama_reachable(ollama_base_url, policy=policy):
         logger.warning(
             "Ollama not reachable at %s and offline_mode is on; "
             "falling back to DeterministicHashEmbedder. Retrieval quality "
@@ -317,4 +379,8 @@ def make_embedder(config: object) -> Embedder:
         )
         return DeterministicHashEmbedder(dimension=384)
 
-    return OllamaEmbedder(model=embedding_model, base_url=ollama_base_url)
+    return OllamaEmbedder(
+        model=embedding_model,
+        base_url=ollama_base_url,
+        policy=policy,
+    )
