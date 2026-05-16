@@ -106,6 +106,7 @@ def test_analytics_package_does_not_import_generation_or_retrieval() -> None:
     import eurpe.analytics.events  # noqa: F401
     import eurpe.analytics.factory  # noqa: F401
     import eurpe.analytics.logger  # noqa: F401
+
     delta = set(sys.modules) - baseline
 
     leaf_violations = {
@@ -116,6 +117,5 @@ def test_analytics_package_does_not_import_generation_or_retrieval() -> None:
         or m in {"eurpe.generation.workflow", "eurpe.generation.llm"}
     }
     assert leaf_violations == set(), (
-        f"eurpe.analytics must be a leaf module but transitively imports: "
-        f"{sorted(leaf_violations)}"
+        f"eurpe.analytics must be a leaf module but transitively imports: {sorted(leaf_violations)}"
     )

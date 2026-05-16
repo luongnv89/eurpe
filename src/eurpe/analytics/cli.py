@@ -115,16 +115,14 @@ def export_events(
     source = cfg.analytics_log_path()
     if not source.exists():
         typer.echo(
-            f"error: analytics log not found at {source}. "
-            "No events have been recorded yet.",
+            f"error: analytics log not found at {source}. No events have been recorded yet.",
             err=True,
         )
         raise typer.Exit(code=1)
 
     if output.exists() and not overwrite:
         typer.echo(
-            f"error: output file already exists: {output} "
-            "(pass --overwrite/-f to replace it)",
+            f"error: output file already exists: {output} (pass --overwrite/-f to replace it)",
             err=True,
         )
         raise typer.Exit(code=1)

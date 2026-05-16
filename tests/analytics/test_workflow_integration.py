@@ -196,8 +196,7 @@ def test_workflow_emits_two_events_with_no_content_leak(tmp_path: Path) -> None:
     # least one citation. Otherwise the "snippet not in JSONL"
     # assertion below would be vacuously true.
     assert any(_SENTINEL_SNIPPET_PREFIX in c.snippet for c in draft.citations), (
-        "test corpus must surface sentinel-bearing snippets so the "
-        "leak assertion is meaningful"
+        "test corpus must surface sentinel-bearing snippets so the leak assertion is meaningful"
     )
 
     raw = log_path.read_text(encoding="utf-8")
@@ -209,9 +208,7 @@ def test_workflow_emits_two_events_with_no_content_leak(tmp_path: Path) -> None:
     # request.user_intent (or any prompt fragment derived from it)
     # into an event payload — the workflow architecturally never does
     # this today, and this test pins that.
-    assert _SENTINEL_INTENT not in raw, (
-        f"user_intent sentinel leaked into analytics log:\n{raw!r}"
-    )
+    assert _SENTINEL_INTENT not in raw, f"user_intent sentinel leaked into analytics log:\n{raw!r}"
     # Snippet sentinel is unique per chunk; check that NONE of them
     # surfaced. A retrieved passage that landed in a payload field
     # would be caught here.

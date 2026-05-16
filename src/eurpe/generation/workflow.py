@@ -329,9 +329,7 @@ class SectionGenerationWorkflow:
                 event_type=EventType.DRAFT_STARTED,
                 section_type=request.section_type.value,
                 target_programme=(
-                    request.target_programme.value
-                    if request.target_programme is not None
-                    else None
+                    request.target_programme.value if request.target_programme is not None else None
                 ),
                 top_k_examples=request.top_k_examples,
                 lessons_learned=request.lessons_learned,
