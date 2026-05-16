@@ -150,7 +150,8 @@ def test_make_embedder_falls_back_when_offline_and_ollama_unreachable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        "eurpe.retrieval.embeddings._ollama_reachable", lambda _url, timeout=2.0: False
+        "eurpe.retrieval.embeddings._ollama_reachable",
+        lambda _url, timeout=2.0, *, policy=None: False,
     )
     cfg = _config_with(offline_mode=True)
     embedder = make_embedder(cfg)
@@ -162,7 +163,8 @@ def test_make_embedder_uses_ollama_when_reachable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        "eurpe.retrieval.embeddings._ollama_reachable", lambda _url, timeout=2.0: True
+        "eurpe.retrieval.embeddings._ollama_reachable",
+        lambda _url, timeout=2.0, *, policy=None: True,
     )
     cfg = _config_with(offline_mode=True)
     embedder = make_embedder(cfg)
@@ -181,7 +183,7 @@ def test_make_embedder_uses_ollama_when_offline_mode_disabled(
 
     called = {"probed": False}
 
-    def _record(_url: str, timeout: float = 2.0) -> bool:
+    def _record(_url: str, timeout: float = 2.0, *, policy=None) -> bool:
         called["probed"] = True
         return False
 
@@ -234,7 +236,8 @@ def test_make_embedder_falls_back_with_blocked_probe(
     """
 
     monkeypatch.setattr(
-        "eurpe.retrieval.embeddings._ollama_reachable", lambda _url, timeout=2.0: False
+        "eurpe.retrieval.embeddings._ollama_reachable",
+        lambda _url, timeout=2.0, *, policy=None: False,
     )
     cfg = _config_with(offline_mode=True)
     embedder = make_embedder(cfg)

@@ -277,7 +277,8 @@ def test_make_llm_client_falls_back_when_offline_and_unreachable(
     """Offline + Ollama unreachable → :class:`DeterministicLLMClient`."""
 
     monkeypatch.setattr(
-        "eurpe.generation.llm._ollama_llm_reachable", lambda _url, timeout=2.0: False
+        "eurpe.generation.llm._ollama_llm_reachable",
+        lambda _url, timeout=2.0, *, policy=None: False,
     )
     cfg = _config_with(offline_mode=True)
     client = make_llm_client(cfg)
@@ -290,7 +291,8 @@ def test_make_llm_client_uses_ollama_when_reachable(
     """Offline + Ollama reachable → :class:`OllamaLLMClient`."""
 
     monkeypatch.setattr(
-        "eurpe.generation.llm._ollama_llm_reachable", lambda _url, timeout=2.0: True
+        "eurpe.generation.llm._ollama_llm_reachable",
+        lambda _url, timeout=2.0, *, policy=None: True,
     )
     cfg = _config_with(offline_mode=True)
     client = make_llm_client(cfg)
@@ -310,7 +312,7 @@ def test_make_llm_client_skips_probe_when_offline_disabled(
 
     called = {"probed": False}
 
-    def _record(_url: str, timeout: float = 2.0) -> bool:
+    def _record(_url: str, timeout: float = 2.0, *, policy=None) -> bool:
         called["probed"] = True
         return False
 
@@ -334,7 +336,8 @@ def test_make_llm_client_falls_back_with_blocked_probe(
     """
 
     monkeypatch.setattr(
-        "eurpe.generation.llm._ollama_llm_reachable", lambda _url, timeout=2.0: False
+        "eurpe.generation.llm._ollama_llm_reachable",
+        lambda _url, timeout=2.0, *, policy=None: False,
     )
     cfg = _config_with(offline_mode=True)
     client = make_llm_client(cfg)

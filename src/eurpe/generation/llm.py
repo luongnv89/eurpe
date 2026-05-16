@@ -47,6 +47,11 @@ from urllib.parse import urlparse
 import httpx
 
 from eurpe.generation.errors import GenerationError, LLMUnavailableError
+from eurpe.security import (
+    EgressDeniedError,
+    NetworkPolicyGate,
+    make_network_policy,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -110,10 +115,16 @@ class OllamaLLMClient:
         base_url: str,
         model: str,
         timeout: float = 120.0,
+        policy: NetworkPolicyGate | None = None,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._model = model
         self._timeout = timeout
+        # Optional, default-None for backward compatibility with the
+        # large set of existing tests that build OllamaLLMClient
+        # directly. The factory always wires the gate; only
+        # production paths consult it.
+        self._policy = policy
 
     @property
     def model(self) -> str:
@@ -153,6 +164,19 @@ class OllamaLLMClient:
                 "num_predict": max_tokens,
             },
         }
+        # Gate FIRST so a deny never reaches httpx with the prompt
+        # payload. The gate's audit log records the attempt but never
+        # the prompt body — that contract is enforced inside
+        # eurpe.security.audit, not here.
+        if self._policy is not None:
+            parsed = urlparse(self._base_url)
+            self._policy.check(
+                host=parsed.hostname or "localhost",
+                port=parsed.port or 11434,
+                scheme=parsed.scheme or "http",
+                path="/api/generate",
+                source="ollama_llm.generate",
+            )
         try:
             with httpx.Client(timeout=self._timeout) as client:
                 resp = client.post(url, json=body)
@@ -294,7 +318,12 @@ class DeterministicLLMClient:
 # ---------------------------------------------------------------------------
 
 
-def _ollama_llm_reachable(base_url: str, timeout: float = 2.0) -> bool:
+def _ollama_llm_reachable(
+    base_url: str,
+    timeout: float = 2.0,
+    *,
+    policy: NetworkPolicyGate | None = None,
+) -> bool:
     """Best-effort TCP probe of the Ollama daemon's host:port.
 
     Same shape as :func:`eurpe.retrieval.embeddings._ollama_reachable`
@@ -304,6 +333,12 @@ def _ollama_llm_reachable(base_url: str, timeout: float = 2.0) -> bool:
     fixture raises on every ``socket.connect``, and a test that wants
     to exercise the LLM-only fallback path needs to patch *this*
     function specifically.
+
+    When ``policy`` is supplied, the gate is consulted FIRST. A deny
+    is treated as "not reachable" (caller falls back to the
+    deterministic LLM client) rather than re-raising — the factory's
+    contract is to degrade gracefully, not to crash the application.
+    The denial is still recorded in the audit log by the gate itself.
 
     Catches :class:`OSError` (the standard "connection refused / timed
     out / unreachable" family) and returns ``False``. Other exception
@@ -316,6 +351,17 @@ def _ollama_llm_reachable(base_url: str, timeout: float = 2.0) -> bool:
     parsed = urlparse(base_url)
     host = parsed.hostname or "localhost"
     port = parsed.port or 11434
+    if policy is not None:
+        try:
+            policy.check(
+                host=host,
+                port=port,
+                scheme=parsed.scheme or "tcp",
+                path="/",
+                source="ollama_llm.reachable_probe",
+            )
+        except EgressDeniedError:
+            return False
     try:
         with socket.create_connection((host, port), timeout=timeout):
             return True
@@ -352,7 +398,21 @@ def make_llm_client(config: object) -> LLMClient:
     llm_model = getattr(models, "llm_model", "llama3.1:8b")
     ollama_base_url = getattr(models, "ollama_base_url", "http://localhost:11434")
 
-    if offline_mode and not _ollama_llm_reachable(ollama_base_url):
+    # Build the gate once and pass it to both the probe and the
+    # client. ``make_network_policy`` is duck-typed; a partial mock
+    # without ``network_audit_log_path`` would raise — wrap narrowly so
+    # only the documented "partial mock" failure modes (ValueError when
+    # runtime_dir/audit_log_path are both missing, TypeError on a
+    # non-path return, AttributeError on a heavily stubbed mock) fall
+    # back to the legacy no-gate path. A real construction bug must
+    # surface, not fail-open silently.
+    policy: NetworkPolicyGate | None
+    try:
+        policy = make_network_policy(config)
+    except (ValueError, TypeError, AttributeError):  # pragma: no cover - defensive: degraded mock
+        policy = None
+
+    if offline_mode and not _ollama_llm_reachable(ollama_base_url, policy=policy):
         logger.warning(
             "Ollama not reachable at %s and offline_mode is on; "
             "falling back to DeterministicLLMClient. Drafting quality "
@@ -363,4 +423,8 @@ def make_llm_client(config: object) -> LLMClient:
         )
         return DeterministicLLMClient()
 
-    return OllamaLLMClient(base_url=ollama_base_url, model=llm_model)
+    return OllamaLLMClient(
+        base_url=ollama_base_url,
+        model=llm_model,
+        policy=policy,
+    )
