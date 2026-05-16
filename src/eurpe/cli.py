@@ -111,13 +111,13 @@ def smoke(
     # non-zero with a clear regression message.
     if not _smoke_egress_probe(config):
         typer.echo(
-            f"  network policy   : FAIL  TEST-NET probe was ALLOWED — "
-            f"check your network_allowlist for an over-broad entry."
+            "  network policy   : FAIL  TEST-NET probe was ALLOWED — "
+            "check your network_allowlist for an over-broad entry."
         )
         typer.echo("")
         typer.echo("[FAIL] Security regression: TEST-NET probe was ALLOWED.")
         raise typer.Exit(code=1)
-    typer.echo(f"  network policy   : OK    TEST-NET probe denied as expected")
+    typer.echo("  network policy   : OK    TEST-NET probe denied as expected")
 
     typer.echo("")
     typer.echo("[OK] EURPE workspace is ready.")

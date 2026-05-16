@@ -44,7 +44,7 @@ from eurpe.security.errors import EgressDeniedError
 logger = logging.getLogger(__name__)
 
 
-class Decision(str, enum.Enum):
+class Decision(enum.StrEnum):
     """Result of a :meth:`NetworkPolicyGate.check`.
 
     String-valued so the variant name appears verbatim in the JSONL

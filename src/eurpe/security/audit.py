@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from threading import Lock
 
@@ -46,12 +46,17 @@ _LOCK = Lock()
 
 
 def _redact_path(path: str) -> str:
-    """Keep only the first path segment.
+    """Keep only the first path segment, stripping any query / fragment.
 
     ``/api/embed/v1/foo`` → ``/api`` — enough to distinguish "an
     embedding request" from "a model-list request" while dropping any
     user-supplied segments (proposal IDs, hash slugs, etc.) that could
     leak corpus content.
+
+    Defense-in-depth: even though no real call site passes a query
+    string in the ``path`` argument, we still strip everything past
+    ``?`` and ``#`` so a future regression at a call site can't write
+    secret query parameters into the audit log.
 
     Edge cases:
 
@@ -60,6 +65,14 @@ def _redact_path(path: str) -> str:
       prefixed with ``/`` so the log shape is uniform.
     """
 
+    if not path or path == "/":
+        return "/"
+    # Drop a stray query string or fragment first. Anything after
+    # '?' or '#' is treated as opaque user data we never want logged.
+    for sep in ("?", "#"):
+        idx = path.find(sep)
+        if idx != -1:
+            path = path[:idx]
     if not path or path == "/":
         return "/"
     # Strip leading slashes first so split doesn't produce a leading
@@ -161,7 +174,7 @@ def log_attempt(
     """
 
     record = {
-        "timestamp": datetime.now(tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "timestamp": datetime.now(tz=UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "host": host.lower(),
         "port": int(port),
         "scheme": scheme.lower(),
