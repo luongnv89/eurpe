@@ -1,0 +1,92 @@
+# Shift-left QA for EURPE. Everything that can run locally lives here;
+# CI is a thin re-verification layer.
+#
+# Stage split:
+#   commit  — formatting, lint, security, full non-e2e suite with coverage (~30s)
+#   push    — CLI E2E smoke + offline fixture-only E2E pipeline test (~20s)
+#
+# Install:
+#   pre-commit install
+#   pre-commit install --hook-type pre-push
+
+minimum_pre_commit_version: "3.5.0"
+
+default_language_version:
+  python: python3.11
+
+repos:
+  # Hygiene
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+        stages: [pre-commit]
+      - id: end-of-file-fixer
+        stages: [pre-commit]
+      - id: check-yaml
+        stages: [pre-commit]
+      - id: check-toml
+        stages: [pre-commit]
+      - id: check-added-large-files
+        args: ["--maxkb=1024"]
+        stages: [pre-commit]
+      - id: check-merge-conflict
+        stages: [pre-commit]
+      - id: detect-private-key
+        stages: [pre-commit]
+
+  # Ruff: lint + format. Matches [tool.ruff] in pyproject.toml.
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.8.4
+    hooks:
+      - id: ruff
+        args: ["--fix"]
+        stages: [pre-commit]
+      - id: ruff-format
+        stages: [pre-commit]
+
+  # Offline Python security scan.
+  - repo: https://github.com/PyCQA/bandit
+    rev: 1.8.0
+    hooks:
+      - id: bandit
+        args: ["-q", "-r", "src/", "--skip", "B101"]
+        stages: [pre-commit]
+
+  # Secret scanning (offline).
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.5.0
+    hooks:
+      - id: detect-secrets
+        args: ["--baseline", ".secrets.baseline"]
+        exclude: ^(\.venv/|corpus/|proposals/|e2e-out/|tests/.*fixtures/)
+        stages: [pre-commit]
+
+  # Local hooks run via the project venv so they see installed deps.
+  - repo: local
+    hooks:
+      # Commit stage: full non-e2e suite (807 fast + 10 docling tests, ~30s)
+      # with coverage. Coverage gate keeps regressions out of main without
+      # needing CI to recompute.
+      - id: pytest-cov
+        name: pytest (full non-e2e suite + coverage)
+        entry: .venv/bin/pytest -m "not e2e" --cov=src/eurpe --cov-report=term-missing -q
+        language: system
+        pass_filenames: false
+        stages: [pre-commit]
+
+      # Push stage: CLI surface + fixture-only E2E pipeline (offline, ~10s).
+      # The full E2E (real proposals/, real LLM) runs in .github/workflows/e2e.yml.
+      - id: cli-e2e
+        name: CLI end-to-end smoke
+        entry: bash scripts/e2e_test.sh
+        language: system
+        pass_filenames: false
+        stages: [pre-push]
+
+      - id: e2e-fixtures
+        name: E2E pipeline (fixture-only, offline)
+        entry: .venv/bin/pytest tests/e2e/ -m e2e -k sample_proposal -q
+        language: system
+        pass_filenames: false
+        stages: [pre-push]

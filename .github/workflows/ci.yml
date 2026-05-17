@@ -1,0 +1,43 @@
+name: CI
+
+# Thin safety net. All real checks (ruff, bandit, detect-secrets, full
+# non-e2e pytest with coverage, CLI E2E, fixture-only E2E pipeline) live
+# in .pre-commit-config.yaml and run locally on commit/push.
+#
+# This workflow exists only to catch the case where someone bypassed the
+# local hooks. The slow real-LLM E2E suite has its own workflow (e2e.yml).
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  precommit:
+    name: pre-commit (re-verify commit + push hooks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install package + dev deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]" pre-commit
+      - name: Shim .venv for local hooks
+        # Local hooks call `.venv/bin/pytest`. CI installs into the system
+        # Python; symlink so the hook entry resolves.
+        run: |
+          mkdir -p .venv/bin
+          ln -sf "$(which pytest)" .venv/bin/pytest
+      - name: pre-commit (commit stage)
+        run: pre-commit run --all-files --show-diff-on-failure
+      - name: pre-commit (push stage)
+        run: pre-commit run --all-files --hook-stage pre-push --show-diff-on-failure
