@@ -388,6 +388,12 @@ def _flatten_audit_issues(report: ReleaseAuditReport) -> list[CitationIssue]:
 #: did its job"; in coordinator mode (real LLM) the same finding
 #: would be release-blocking. The verdict logic therefore tolerates
 #: this code in smoke mode only.
+#:
+#: Maintenance note: if the deterministic stub ever grows a second
+#: known-good finding (e.g., a future ``no_evidence_escape`` from
+#: the stub's empty-retrieval path), add the code here ONLY after
+#: confirming the stub emits it by construction. Adding by accident
+#: silently weakens the smoke-mode release gate.
 _SMOKE_TOLERATED_FINDINGS: frozenset[str] = frozenset({"placeholder_text"})
 
 
