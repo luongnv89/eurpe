@@ -106,9 +106,14 @@ export function IngestWizard() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-3xl space-y-6 p-6">
+    <section
+      aria-labelledby="ingest-heading"
+      className="mx-auto w-full max-w-3xl space-y-6 p-6"
+    >
       <header className="space-y-2">
-        <h1 className="text-3xl font-semibold tracking-tight">Ingest a proposal</h1>
+        <h1 id="ingest-heading" className="text-3xl font-semibold tracking-tight">
+          Ingest a proposal
+        </h1>
         <p className="text-muted-foreground">
           Drop a proposal PDF, review the extracted metadata, and add it to the local index.
         </p>
@@ -116,7 +121,7 @@ export function IngestWizard() {
 
       {enumsError && (
         <Alert variant="destructive">
-          <AlertCircle className="h-4 w-4" />
+          <AlertCircle className="h-4 w-4" aria-hidden="true" />
           <AlertTitle>Could not load form choices</AlertTitle>
           <AlertDescription>{enumsError}</AlertDescription>
         </Alert>
@@ -131,6 +136,10 @@ export function IngestWizard() {
             </CardDescription>
           </CardHeader>
           <CardContent>
+            {/* role="presentation" is intentional: the visible "Choose file"
+                Button below is the keyboard-accessible entry point. The
+                drag-and-drop is a pointer-only enhancement (WCAG SC 2.5.7
+                exemption — equivalent pointerless path provided). */}
             <div
               role="presentation"
               onDragOver={(e) => {
@@ -139,20 +148,25 @@ export function IngestWizard() {
               }}
               onDragLeave={() => setDragActive(false)}
               onDrop={onDrop}
+              aria-busy={parsing}
               className={`flex flex-col items-center justify-center gap-3 rounded-lg border-2 border-dashed p-10 text-center transition-colors ${
                 dragActive ? "border-primary bg-accent" : "border-muted"
               }`}
             >
               {parsing ? (
-                <>
-                  <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                <div role="status" aria-live="polite" className="flex flex-col items-center gap-3">
+                  <Loader2
+                    className="h-8 w-8 animate-spin text-muted-foreground"
+                    aria-hidden="true"
+                  />
                   <p className="text-sm text-muted-foreground">Parsing PDF…</p>
-                </>
+                </div>
               ) : (
                 <>
-                  <Upload className="h-8 w-8 text-muted-foreground" />
+                  <Upload className="h-8 w-8 text-muted-foreground" aria-hidden="true" />
                   <p className="text-sm text-muted-foreground">Drop a PDF here or pick one</p>
                   <label className="cursor-pointer">
+                    <span className="sr-only">Choose a PDF file to upload</span>
                     <input
                       type="file"
                       accept="application/pdf,.pdf"
@@ -168,7 +182,7 @@ export function IngestWizard() {
             </div>
             {errorMessage && (
               <Alert className="mt-4" variant="destructive">
-                <AlertCircle className="h-4 w-4" />
+                <AlertCircle className="h-4 w-4" aria-hidden="true" />
                 <AlertTitle>Upload failed</AlertTitle>
                 <AlertDescription>{errorMessage}</AlertDescription>
               </Alert>
@@ -187,7 +201,7 @@ export function IngestWizard() {
           </CardHeader>
           <CardContent>
             <div className="mb-4 flex items-center gap-2 rounded-md border bg-muted px-3 py-2 text-sm">
-              <FileText className="h-4 w-4" />
+              <FileText className="h-4 w-4" aria-hidden="true" />
               <span className="truncate" title={parseResult.source_path}>
                 {parseResult.title ?? parseResult.source_path}
               </span>
@@ -208,10 +222,14 @@ export function IngestWizard() {
       )}
 
       {step === "success" && confirmResult && (
-        <Card>
+        <Card
+          role="status"
+          aria-live="polite"
+          aria-label={`Proposal indexed — ${confirmResult.chunks_added} chunks added to ${confirmResult.collection}`}
+        >
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <CheckCircle2 className="h-5 w-5 text-green-600" />
+              <CheckCircle2 className="h-5 w-5 text-green-700" aria-hidden="true" />
               Proposal indexed
             </CardTitle>
             <CardDescription>
@@ -230,6 +248,6 @@ export function IngestWizard() {
           </CardContent>
         </Card>
       )}
-    </div>
+    </section>
   );
 }
