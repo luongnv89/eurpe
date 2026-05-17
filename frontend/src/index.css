@@ -2,7 +2,18 @@
 @tailwind components;
 @tailwind utilities;
 
-/* shadcn/ui slate base — HSL CSS variables. */
+/* shadcn/ui slate base — HSL CSS variables.
+ *
+ * Two values are tightened from the stock slate palette to clear WCAG
+ * 2.1 AA contrast (4.5:1 for normal text, 3:1 for non-text/large UI)
+ * against the white light-mode background:
+ *
+ *   --muted-foreground  46.9% L → 38% L   (4.75 → 6.58 contrast)
+ *   --destructive       60.2% L → 45% L   (3.59 → 5.55 contrast)
+ *
+ * See ``docs/accessibility.md`` for the full contrast audit and
+ * rationale — Task 3.6 / issue #20 AC #3.
+ */
 @layer base {
   :root {
     --background: 0 0% 100%;
@@ -21,12 +32,12 @@
     --secondary-foreground: 222.2 47.4% 11.2%;
 
     --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
+    --muted-foreground: 215.4 16.3% 38%;
 
     --accent: 210 40% 96.1%;
     --accent-foreground: 222.2 47.4% 11.2%;
 
-    --destructive: 0 84.2% 60.2%;
+    --destructive: 0 72% 45%;
     --destructive-foreground: 210 40% 98%;
 
     --border: 214.3 31.8% 91.4%;
