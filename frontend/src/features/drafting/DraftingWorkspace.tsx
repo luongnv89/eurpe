@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { AlertCircle, CheckCircle2, Loader2, RefreshCw, Sparkles } from "lucide-react";
+import { AlertCircle, CheckCircle2, Download, Loader2, RefreshCw, Sparkles } from "lucide-react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -24,6 +24,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 
 import {
+  fetchCallContext,
   fetchGenerationEnums,
   fetchProfiles,
   generateSection,
@@ -150,20 +151,67 @@ export function DraftingWorkspace() {
   const [accepted, setAccepted] = useState<boolean>(false);
   const [stoppedAtCap, setStoppedAtCap] = useState<boolean>(false);
 
+  // Issue #67: auto-fill structured-context fields from a pasted
+  // Funding & Tenders Portal URL. ``fetchHint`` shows the post-success
+  // "paste outcomes/scope manually" nudge because the portal does not
+  // expose those two fields via its public API for current Horizon
+  // Europe topics (see eurpe/intake/call_fetcher.py for the rationale).
+  const [callUrl, setCallUrl] = useState<string>("");
+  const [fetchingCall, setFetchingCall] = useState<boolean>(false);
+  const [fetchError, setFetchError] = useState<string | null>(null);
+  const [fetchHint, setFetchHint] = useState<string | null>(null);
+
   useEffect(() => {
     const ctrl = new AbortController();
     fetchGenerationEnums(ctrl.signal)
       .then(setEnums)
-      .catch((err) => setEnumsError(err.message ?? String(err)));
+      .catch((err) => {
+        if (err?.name === "AbortError" || ctrl.signal.aborted) return;
+        setEnumsError(err.message ?? String(err));
+      });
     fetchProfiles(ctrl.signal)
       .then(setProfiles)
-      .catch((err) => setProfilesError(err.message ?? String(err)));
+      .catch((err) => {
+        if (err?.name === "AbortError" || ctrl.signal.aborted) return;
+        setProfilesError(err.message ?? String(err));
+      });
     return () => ctrl.abort();
   }, []);
 
   const profileItems = useMemo(() => profiles?.profiles ?? [], [profiles]);
   const sectionTypes = useMemo(() => enums?.section_type ?? [], [enums]);
   const programmes = useMemo(() => enums?.programme ?? [], [enums]);
+
+  // Issue #67: paste a portal URL, fetch the call/topic triple, drop it
+  // into the structured tab, switch the Tabs to ``structured`` so the
+  // operator sees the result without an extra click.
+  const handleFetchCall = useCallback(async () => {
+    const trimmed = callUrl.trim();
+    if (!trimmed) return;
+    setFetchingCall(true);
+    setFetchError(null);
+    setFetchHint(null);
+    try {
+      const result = await fetchCallContext(trimmed);
+      setStructured({
+        callId: result.call_id,
+        topicId: result.topic_id,
+        topicTitle: result.topic_title,
+        expectedOutcomes: result.expected_outcomes,
+        scope: result.scope,
+      });
+      setContextMode("structured");
+      // Always-empty fields in v1; tell the operator why so the gap
+      // isn't mistaken for a broken fetch.
+      setFetchHint(
+        "Call ID, topic ID, and title auto-filled. Paste Expected outcomes and Scope from the portal — they are not available via the portal's public API for current topics.",
+      );
+    } catch (err) {
+      setFetchError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setFetchingCall(false);
+    }
+  }, [callUrl]);
 
   const handleGenerate = useCallback(async () => {
     const errors: string[] = [];
@@ -313,6 +361,9 @@ export function DraftingWorkspace() {
     setDraft(null);
     setAccepted(false);
     setStoppedAtCap(false);
+    setCallUrl("");
+    setFetchError(null);
+    setFetchHint(null);
   }
 
   // The implicit first pass is iteration 1 (the draft itself); each
@@ -457,6 +508,63 @@ export function DraftingWorkspace() {
 
           <div className="space-y-2">
             <Label>Call / topic context</Label>
+
+            {/* Issue #67: paste a portal URL → auto-fill structured tab. */}
+            <div className="rounded-md border border-input bg-muted/30 p-3 space-y-2">
+              <Label htmlFor="call_url" className="text-sm font-medium">
+                Auto-fill from EU Funding & Tenders Portal URL
+              </Label>
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <Input
+                  id="call_url"
+                  type="url"
+                  placeholder="https://ec.europa.eu/info/funding-tenders/opportunities/portal/screen/opportunities/topic-details/HORIZON-..."
+                  value={callUrl}
+                  onChange={(e) => setCallUrl(e.target.value)}
+                  disabled={fetchingCall}
+                  aria-describedby="call_url_help"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => void handleFetchCall()}
+                  disabled={fetchingCall || !callUrl.trim()}
+                  aria-label="Fetch call context from this URL"
+                >
+                  {fetchingCall ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                      Fetching…
+                    </>
+                  ) : (
+                    <>
+                      <Download className="h-4 w-4" aria-hidden="true" />
+                      Fetch
+                    </>
+                  )}
+                </Button>
+              </div>
+              <p id="call_url_help" className="text-xs text-muted-foreground">
+                Contacts <code>ec.europa.eu</code> and{" "}
+                <code>api.tech.ec.europa.eu</code> to recover the call ID, topic ID,
+                and topic title for the pasted URL.
+              </p>
+              {fetchError && (
+                <Alert variant="destructive" role="alert">
+                  <AlertCircle className="h-4 w-4" aria-hidden="true" />
+                  <AlertTitle>Could not fetch call context</AlertTitle>
+                  <AlertDescription>{fetchError}</AlertDescription>
+                </Alert>
+              )}
+              {fetchHint && !fetchError && (
+                <Alert role="status" aria-live="polite">
+                  <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
+                  <AlertTitle>Auto-fill complete</AlertTitle>
+                  <AlertDescription>{fetchHint}</AlertDescription>
+                </Alert>
+              )}
+            </div>
+
             <Tabs
               value={contextMode}
               onValueChange={(v) => setContextMode(v as ContextMode)}

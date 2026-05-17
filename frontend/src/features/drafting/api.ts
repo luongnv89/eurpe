@@ -195,3 +195,37 @@ export async function iterateSection(
   });
   return parseJsonOrThrow<IterateSectionResponse>(response);
 }
+
+/**
+ * Wire shape for POST /api/generation/fetch-call (issue #67).
+ *
+ * Mirrors :class:`eurpe.api.schemas.FetchCallResponse`.
+ *
+ * In v1, ``expected_outcomes`` and ``scope`` always come back as empty
+ * strings because the EU portal does not expose those fields via a
+ * public API for current Horizon Europe topics. See the server-side
+ * module ``eurpe.intake.call_fetcher`` for the rationale; the UI
+ * surfaces a "paste these manually" hint after auto-fill.
+ */
+export interface FetchCallResponse {
+  call_id: string;
+  topic_id: string;
+  topic_title: string;
+  expected_outcomes: string;
+  scope: string;
+  call_title: string;
+  source_url: string;
+}
+
+export async function fetchCallContext(
+  url: string,
+  signal?: AbortSignal,
+): Promise<FetchCallResponse> {
+  const response = await fetch("/api/generation/fetch-call", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ url }),
+    signal,
+  });
+  return parseJsonOrThrow<FetchCallResponse>(response);
+}

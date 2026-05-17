@@ -49,6 +49,8 @@ from eurpe.api.dependencies import get_generation_service
 from eurpe.api.schemas import (
     CitationPayload,
     DraftingProfileSummary,
+    FetchCallRequest,
+    FetchCallResponse,
     GenerateSectionRequest,
     GenerateSectionResponse,
     GenerationEnumsResponse,
@@ -69,6 +71,12 @@ from eurpe.generation import (
     SectionIterationRequest,
 )
 from eurpe.generation.profiles import list_available_profiles, load_profile
+from eurpe.intake.call_fetcher import (
+    InvalidPortalURLError,
+    PortalUnavailableError,
+    TopicNotFoundError,
+    fetch_call_context,
+)
 from eurpe.schema import Programme, SectionType
 
 logger = logging.getLogger(__name__)
@@ -347,4 +355,57 @@ def iterate_section(
         iteration_index=result.iteration_index,
         max_iterations=result.max_iterations,
         stopped=result.stopped,
+    )
+
+
+@router.post("/fetch-call", response_model=FetchCallResponse)
+def fetch_call(body: FetchCallRequest) -> FetchCallResponse:
+    """Auto-fill structured call context from a Funding & Tenders Portal URL (issue #67).
+
+    The route is intentionally side-effect-free: it makes one outbound
+    request to the public SEDIA search API (``api.tech.ec.europa.eu``)
+    and returns the call_id / topic_id / topic_title triple. It does
+    not persist anything, does not touch the corpus index, and does
+    not invoke the LLM.
+
+    This is the one route in EURPE that intentionally calls out to the
+    internet — see ``eurpe.intake.call_fetcher`` module docstring for
+    the network-policy rationale.
+
+    Error mapping
+    -------------
+    * :class:`InvalidPortalURLError` → 422 (operator pasted a non-portal
+      URL or a malformed link — they can fix this).
+    * :class:`TopicNotFoundError` → 404 (URL parsed cleanly but SEDIA
+      had no entry; usually a very recent topic).
+    * :class:`PortalUnavailableError` → 502 (network failure or SEDIA
+      schema break; the operator did nothing wrong).
+    """
+
+    try:
+        result = fetch_call_context(body.url)
+    except InvalidPortalURLError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+    except TopicNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+    except PortalUnavailableError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=str(exc),
+        ) from exc
+
+    return FetchCallResponse(
+        call_id=result.call_id,
+        topic_id=result.topic_id,
+        topic_title=result.topic_title,
+        expected_outcomes=result.expected_outcomes,
+        scope=result.scope,
+        call_title=result.call_title,
+        source_url=result.source_url,
     )

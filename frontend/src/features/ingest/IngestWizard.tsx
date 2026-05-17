@@ -53,7 +53,10 @@ export function IngestWizard() {
     const ctrl = new AbortController();
     fetchEnums(ctrl.signal)
       .then(setEnums)
-      .catch((err) => setEnumsError(err.message ?? String(err)));
+      .catch((err) => {
+        if (err?.name === "AbortError" || ctrl.signal.aborted) return;
+        setEnumsError(err.message ?? String(err));
+      });
     return () => ctrl.abort();
   }, []);
 

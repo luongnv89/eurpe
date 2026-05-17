@@ -491,3 +491,74 @@ class IterateSectionResponse(BaseModel):
             "stop earlier by simply not calling /iterate again (AC #2)."
         ),
     )
+
+
+# ---------------------------------------------------------------------------
+# Auto-fill call context from portal URL (issue #67)
+# ---------------------------------------------------------------------------
+
+
+class FetchCallRequest(BaseModel):
+    """Operator-pasted URL to fetch call context for ``POST /api/generation/fetch-call``.
+
+    The route extracts the topic identifier from the URL path, queries
+    the public SEDIA search API, and returns a :class:`FetchCallResponse`
+    the React workspace uses to auto-fill its structured-context form.
+
+    URL validation happens inside the service layer
+    (:func:`eurpe.intake.call_fetcher.extract_topic_id`) rather than via
+    Pydantic ``HttpUrl`` because the rejection messages we want to
+    surface are domain-specific ("wrong host", "no topic-details
+    segment") and Pydantic's generic URL errors hide that nuance.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    url: str = Field(
+        min_length=1,
+        description=(
+            "EU Funding & Tenders Portal topic URL pasted by the operator. "
+            "Must point to ``ec.europa.eu`` or ``commission.europa.eu`` and "
+            "contain a ``/topic-details/<TOPIC_ID>`` segment."
+        ),
+    )
+
+
+class FetchCallResponse(BaseModel):
+    """Auto-fill payload returned to the drafting workspace.
+
+    Field set deliberately mirrors the React workspace's
+    ``StructuredContext`` shape so the client can spread the response
+    straight into the form state. Note: ``expected_outcomes`` and
+    ``scope`` are always empty strings in v1 — the portal does not
+    expose those fields via its public API for current Horizon Europe
+    topics, so the UI surfaces a "paste these manually" hint after
+    auto-fill. See ``eurpe.intake.call_fetcher`` module docstring for
+    the full rationale.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    call_id: str = Field(description="Call identifier, e.g. ``HORIZON-CL3-2026-02-CS-ECCC``.")
+    topic_id: str = Field(description="Topic identifier, e.g. ``HORIZON-CL3-2026-02-CS-ECCC-02``.")
+    topic_title: str = Field(description="Human-readable topic title.")
+    expected_outcomes: str = Field(
+        description=(
+            "Bullet list of expected outcomes. Always empty in v1 — see "
+            "the schema docstring."
+        ),
+    )
+    scope: str = Field(
+        description=(
+            "Free-text scope. Always empty in v1 — see the schema docstring."
+        ),
+    )
+    call_title: str = Field(
+        description=(
+            "Human-readable call title (informational). Not currently rendered "
+            "by the drafting workspace but available for tooltips / audit."
+        ),
+    )
+    source_url: str = Field(
+        description="The URL the operator pasted, echoed back for audit.",
+    )

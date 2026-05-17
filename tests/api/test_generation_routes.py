@@ -508,3 +508,123 @@ class TestIterateSectionRoute:
             "/api/generation/section/iterate", json=payload
         )
         assert response.status_code == 400, response.text
+
+
+# ---------------------------------------------------------------------------
+# /api/generation/fetch-call (issue #67)
+# ---------------------------------------------------------------------------
+
+
+class TestFetchCallRoute:
+    """Route-level mapping of call_fetcher errors → HTTP status codes.
+
+    The fetcher itself is exercised in detail by
+    :mod:`tests.test_call_fetcher`; here we only care that each error
+    type lands on the correct status code and that the success path
+    returns the expected JSON envelope.
+    """
+
+    _PORTAL_URL = (
+        "https://ec.europa.eu/info/funding-tenders/opportunities/portal/"
+        "screen/opportunities/topic-details/HORIZON-CL3-2026-02-CS-ECCC-02"
+    )
+
+    def test_success_returns_structured_payload(
+        self,
+        configured_app: TestClient,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Patch the fetcher to return a canned result and verify the wire shape."""
+
+        from eurpe.intake.call_fetcher import CallFetchResult
+
+        def _fake_fetch(url: str, **_kw: object) -> CallFetchResult:
+            return CallFetchResult(
+                call_id="HORIZON-CL3-2026-02-CS-ECCC",
+                topic_id="HORIZON-CL3-2026-02-CS-ECCC-02",
+                topic_title="SecureAI",
+                expected_outcomes="",
+                scope="",
+                call_title="Indirectly Managed Action by the ECCC (2026)",
+                source_url=url,
+            )
+
+        monkeypatch.setattr(
+            "eurpe.api.routes.generate.fetch_call_context", _fake_fetch
+        )
+        response = configured_app.post(
+            "/api/generation/fetch-call", json={"url": self._PORTAL_URL}
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["call_id"] == "HORIZON-CL3-2026-02-CS-ECCC"
+        assert body["topic_id"] == "HORIZON-CL3-2026-02-CS-ECCC-02"
+        assert body["topic_title"] == "SecureAI"
+        assert body["expected_outcomes"] == ""
+        assert body["scope"] == ""
+        assert body["source_url"] == self._PORTAL_URL
+
+    def test_invalid_url_maps_to_422(
+        self,
+        configured_app: TestClient,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from eurpe.intake.call_fetcher import InvalidPortalURLError
+
+        def _raises(url: str, **_kw: object) -> None:
+            raise InvalidPortalURLError("not a portal URL")
+
+        monkeypatch.setattr(
+            "eurpe.api.routes.generate.fetch_call_context", _raises
+        )
+        response = configured_app.post(
+            "/api/generation/fetch-call", json={"url": "https://example.com/"}
+        )
+        assert response.status_code == 422, response.text
+        assert "not a portal URL" in response.text
+
+    def test_topic_not_found_maps_to_404(
+        self,
+        configured_app: TestClient,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from eurpe.intake.call_fetcher import TopicNotFoundError
+
+        def _raises(url: str, **_kw: object) -> None:
+            raise TopicNotFoundError("no SEDIA result")
+
+        monkeypatch.setattr(
+            "eurpe.api.routes.generate.fetch_call_context", _raises
+        )
+        response = configured_app.post(
+            "/api/generation/fetch-call", json={"url": self._PORTAL_URL}
+        )
+        assert response.status_code == 404, response.text
+
+    def test_portal_unavailable_maps_to_502(
+        self,
+        configured_app: TestClient,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from eurpe.intake.call_fetcher import PortalUnavailableError
+
+        def _raises(url: str, **_kw: object) -> None:
+            raise PortalUnavailableError("dns failure")
+
+        monkeypatch.setattr(
+            "eurpe.api.routes.generate.fetch_call_context", _raises
+        )
+        response = configured_app.post(
+            "/api/generation/fetch-call", json={"url": self._PORTAL_URL}
+        )
+        assert response.status_code == 502, response.text
+
+    def test_empty_url_rejected_at_pydantic_layer(
+        self, configured_app: TestClient
+    ) -> None:
+        """An empty ``url`` field fails Pydantic's ``min_length`` and never reaches the fetcher."""
+
+        response = configured_app.post(
+            "/api/generation/fetch-call", json={"url": ""}
+        )
+        assert response.status_code == 422, response.text
