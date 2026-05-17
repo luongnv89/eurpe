@@ -303,6 +303,45 @@ class CitationPayload(BaseModel):
     snippet: str = Field(description="Short excerpt of the source chunk.")
 
 
+class IterationRecordPayload(BaseModel):
+    """One critic-loop iteration's record (Task 3.2 / issue #16).
+
+    Mirrors :class:`eurpe.generation.IterationRecord` field-for-field
+    so the React workspace can render the per-iteration history table
+    (changes summary + requirements checked + critique excerpt) without
+    re-deriving anything. Privacy contract is preserved: the critic
+    narrative is on the *draft* (which already carries draft text),
+    never on an analytics event.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    iteration_index: int = Field(
+        ge=2,
+        le=5,
+        description=(
+            "1-indexed iteration number. The initial draft is iteration "
+            "1 (implicit); the first critic pass is 2, etc."
+        ),
+    )
+    changes_summary: str = Field(
+        min_length=1,
+        description="Human-readable summary of what changed in this iteration.",
+    )
+    requirements_checked: list[str] = Field(
+        min_length=1,
+        description="Call/profile requirements the critic checked on this iteration.",
+    )
+    critique_text: str = Field(
+        min_length=1,
+        max_length=4000,
+        description="Free-text critic commentary from the LLM (capped at 4000 chars).",
+    )
+    generated_at: datetime = Field(
+        description="UTC timestamp when this iteration completed.",
+    )
+
+
 class GenerateSectionResponse(BaseModel):
     """``POST /api/generation/section`` — generated draft + citations.
 
@@ -311,6 +350,14 @@ class GenerateSectionResponse(BaseModel):
     ``model`` and ``drafting_profile`` are returned for the audit footer
     the UI displays under the draft so the operator can verify *which*
     model and profile shaped the output without inspecting logs.
+
+    ``iterations`` carries the cumulative critic-loop history (Task 3.2 /
+    issue #16). Empty for single-pass drafts (the default behaviour of
+    ``POST /api/generation/section``) and populated entry-by-entry by
+    ``POST /api/generation/section/iterate`` calls. Surfaced here so a
+    re-issued ``/section`` request (e.g., a UI ‘regenerate’ flow that
+    discards the prior history) can return ``iterations: []`` and a
+    cumulative iterate flow returns the full chain.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -326,4 +373,118 @@ class GenerateSectionResponse(BaseModel):
     drafting_profile: str | None = Field(
         default=None,
         description="Profile applied to the draft, when one was selected.",
+    )
+    iterations: list[IterationRecordPayload] = Field(
+        default_factory=list,
+        description=(
+            "Cumulative critic-loop history. Empty for single-pass drafts; "
+            "populated by /section/iterate calls. The implicit first pass "
+            "is NOT included — the draft body itself represents iteration 1."
+        ),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Critic loop (Task 3.2 / issue #16)
+# ---------------------------------------------------------------------------
+
+
+class IterateSectionRequest(BaseModel):
+    """Operator-facing wire model for ``POST /api/generation/section/iterate``.
+
+    Drives one critic+regenerate pass on top of a previously produced
+    draft. The React workspace owns the loop: it posts this request,
+    receives an :class:`IterateSectionResponse`, and either posts
+    again (Refine) or stops (Accept).
+
+    The request carries enough context to make the iteration
+    stateless on the server: the original generation request, the
+    prior draft (with its full iteration history), and the
+    user-configured iteration ceiling.
+
+    Privacy: all fields here are operator-supplied; no field requires
+    or accepts server-side cross-call state.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    section_type: SectionType = Field(
+        description="Section that was drafted — must match the prior draft's section.",
+    )
+    user_intent: str = Field(
+        min_length=1,
+        description="The *original* user intent. The server augments it with the critique.",
+    )
+    call_context: str = Field(
+        default="",
+        description="Optional pasted call/topic text from the original request.",
+    )
+    target_programme: Programme | None = Field(
+        default=None,
+        description="Programme filter — must match the original request.",
+    )
+    profile_programme: Programme | None = Field(
+        default=None,
+        description="Drafting profile — must match the original request.",
+    )
+    top_k_examples: int = Field(
+        default=5,
+        ge=1,
+        le=20,
+        description="Top-k retrieval count — must match the original request.",
+    )
+    lessons_learned: bool = Field(
+        default=False,
+        description="Lessons-learned flag — must match the original request.",
+    )
+    max_iterations: int = Field(
+        default=3,
+        ge=1,
+        le=5,
+        description=(
+            "User-configured ceiling on iteration count. AC #1 of issue #16: "
+            "‘User can set critic iterations between 1 and 5 before "
+            "generation.’ Bounded to [1, 5] at the wire."
+        ),
+    )
+    prior_draft: GenerateSectionResponse = Field(
+        description=(
+            "The most recent draft (with its full iteration history). "
+            "The server uses this to construct the critic prompt and to "
+            "compute the iteration-over-iteration change summary."
+        ),
+    )
+
+
+class IterateSectionResponse(BaseModel):
+    """``POST /api/generation/section/iterate`` — refined draft + advisory stop flag.
+
+    ``draft`` is the new draft with the freshly-appended
+    :class:`IterationRecordPayload`. ``iteration_index`` and
+    ``max_iterations`` echo the loop state; ``stopped`` is True when
+    this iteration is the last permitted (the UI flips the ‘Refine’
+    button to disabled).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    draft: GenerateSectionResponse = Field(
+        description="The refined draft with the cumulative iteration history.",
+    )
+    iteration_index: int = Field(
+        ge=2,
+        le=5,
+        description="1-indexed iteration number this call produced.",
+    )
+    max_iterations: int = Field(
+        ge=1,
+        le=5,
+        description="User-configured cap, echoed back for UI state.",
+    )
+    stopped: bool = Field(
+        description=(
+            "True when ``iteration_index == max_iterations``: the UI must "
+            "disable the ‘Refine’ button. Advisory — the client can also "
+            "stop earlier by simply not calling /iterate again (AC #2)."
+        ),
     )
