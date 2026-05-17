@@ -92,6 +92,38 @@ The dev server starts on `http://127.0.0.1:5173`. See
 accessibility baseline (contrast audit, keyboard tab traces, and the
 deferred-to-v1.2 list).
 
+### MVP pilot validation
+
+The MVP release gate is the pilot validation orchestrator (Task 3.7
+/ issue #21). A coordinator runs `eurpe pilot run` against one
+real EU call and rates each generated section; the orchestrator
+composes citation audit, performance benchmark, and the
+network-isolation smoke probe into a single
+`release-notes/pilots/<release-tag>.md` artefact.
+
+```bash
+# Smoke-mode pilot (deterministic, no Ollama required).
+eurpe pilot run \
+  --output-dir release-notes/pilots/<release-tag>-smoke \
+  --output-markdown release-notes/pilots/<release-tag>-smoke.md
+
+# Coordinator pilot (real Ollama, real coordinator ratings).
+eurpe pilot run --mode coordinator --runtime ollama \
+  --output-dir release-notes/pilots/<release-tag>
+
+# After the coordinator rates each section:
+eurpe pilot rate release-notes/pilots/<release-tag>/pilot-report.json \
+  -s methodology --coordinator-id coord-a --rating 4 --time-saved 45
+```
+
+See
+[`docs/pilot-validation-runbook.md`](docs/pilot-validation-runbook.md)
+for the full procedure,
+[`docs/pilot-report-template.md`](docs/pilot-report-template.md)
+for the report template, and
+[`release-notes/pilots/v1.0-pilot-smoke.md`](release-notes/pilots/v1.0-pilot-smoke.md)
+for the most recent smoke-mode evidence trail.
+
 ### Tests
 
 The suite is split into two tiers by pytest marker so the inner-loop dev

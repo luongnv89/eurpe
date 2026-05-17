@@ -24,6 +24,7 @@ from eurpe.config import (
 )
 from eurpe.generation.cli import generate_app
 from eurpe.ingestion.cli import ingest as ingest_command
+from eurpe.pilot.cli import pilot_app
 from eurpe.retrieval.cli import index_app
 from eurpe.security import EgressDeniedError, make_network_policy
 
@@ -72,6 +73,11 @@ app.add_typer(analytics_app, name="analytics")
 # package — same mount pattern. The harness measures latency
 # against the PRD's v1 performance targets (issue #19 / Task 3.5).
 app.add_typer(benchmark_app, name="benchmark")
+
+# ``eurpe pilot run`` / ``eurpe pilot rate`` live in the pilot
+# package — same mount pattern. The orchestrator drives the MVP
+# pilot validation flow described in issue #21 / Task 3.7.
+app.add_typer(pilot_app, name="pilot")
 
 
 @app.command()
