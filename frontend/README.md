@@ -54,3 +54,17 @@ variables, and `@/components` / `@/lib/utils` aliases.
 npm run build      # tsc -b && vite build
 npm run preview    # local production preview on 127.0.0.1:4173
 ```
+
+## Accessibility
+
+The React UI ships a "best-effort accessibility baseline" in v1 (Task
+3.6 / issue #20): keyboard-navigable primary flows with visible focus
+states, labelled inputs and generated report regions, WCAG 2.1 AA
+contrast on the slate palette, and a deferred-work hand-off for the
+v1.2 refactor.
+
+The full audit (numerical contrast ratios, manual tab traces,
+verification steps a reviewer can run, and the v1.2 gap list) lives in
+[`docs/accessibility.md`](../docs/accessibility.md). Update that file
+whenever you change a contrast token, add a new flow, or close one of
+the v1.2 deferred items.

@@ -87,7 +87,10 @@ npm run dev
 ```
 
 The dev server starts on `http://127.0.0.1:5173`. See
-[`frontend/README.md`](frontend/README.md) for details.
+[`frontend/README.md`](frontend/README.md) for details, and
+[`docs/accessibility.md`](docs/accessibility.md) for the v1
+accessibility baseline (contrast audit, keyboard tab traces, and the
+deferred-to-v1.2 list).
 
 ### Tests
 

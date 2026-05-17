@@ -104,11 +104,28 @@ export function ConfirmationForm({
     onSubmit(body);
   }
 
+  // Map each required field id to whether its current value triggered
+  // a client-side validation error. Drives aria-invalid + aria-describedby
+  // on the input so screen-readers announce "invalid" plus the reason
+  // (issue #20 — AC #1, AC #2: keyboard-accessible primary flow with
+  // labelled inputs and announced error state).
+  const invalidFields = new Set<string>();
+  if (clientErrors.length > 0) {
+    if (!programme) invalidFields.add("programme");
+    if (!callId.trim()) invalidFields.add("call_id");
+    if (!topicId.trim()) invalidFields.add("topic_id");
+    if (!outcome) invalidFields.add("outcome");
+    const yearNum = Number.parseInt(year, 10);
+    if (!Number.isFinite(yearNum) || yearNum < 2014 || yearNum > 2099) {
+      invalidFields.add("year");
+    }
+  }
+
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
+    <form onSubmit={handleSubmit} className="space-y-4" aria-busy={submitting} noValidate>
       {clientErrors.length > 0 && (
-        <Alert variant="destructive">
-          <AlertCircle className="h-4 w-4" />
+        <Alert variant="destructive" role="alert">
+          <AlertCircle className="h-4 w-4" aria-hidden="true" />
           <AlertTitle>Please complete the required fields</AlertTitle>
           <AlertDescription>
             <ul className="list-disc pl-5">
@@ -120,8 +137,8 @@ export function ConfirmationForm({
         </Alert>
       )}
       {errorMessage && (
-        <Alert variant="destructive">
-          <AlertCircle className="h-4 w-4" />
+        <Alert variant="destructive" role="alert">
+          <AlertCircle className="h-4 w-4" aria-hidden="true" />
           <AlertTitle>Server rejected the submission</AlertTitle>
           <AlertDescription>{errorMessage}</AlertDescription>
         </Alert>
@@ -133,7 +150,11 @@ export function ConfirmationForm({
             Programme <RequiredMark />
           </Label>
           <Select value={programme} onValueChange={setProgramme}>
-            <SelectTrigger id="programme">
+            <SelectTrigger
+              id="programme"
+              aria-required="true"
+              aria-invalid={invalidFields.has("programme")}
+            >
               <SelectValue placeholder="Select programme" />
             </SelectTrigger>
             <SelectContent>
@@ -152,7 +173,12 @@ export function ConfirmationForm({
             Outcome (source-status) <RequiredMark />
           </Label>
           <Select value={outcome} onValueChange={setOutcome}>
-            <SelectTrigger id="outcome">
+            <SelectTrigger
+              id="outcome"
+              aria-required="true"
+              aria-invalid={invalidFields.has("outcome")}
+              aria-describedby="outcome_help"
+            >
               <SelectValue placeholder="Select outcome" />
             </SelectTrigger>
             <SelectContent>
@@ -163,7 +189,7 @@ export function ConfirmationForm({
               ))}
             </SelectContent>
           </Select>
-          <p className="text-xs text-muted-foreground">
+          <p id="outcome_help" className="text-xs text-muted-foreground">
             Drives every chunk's <code>source_status</code>; cannot be changed after indexing.
           </p>
         </div>
@@ -178,6 +204,8 @@ export function ConfirmationForm({
             onChange={(e) => setCallId(e.target.value)}
             placeholder="HORIZON-CL5-2024-D3-02"
             autoComplete="off"
+            aria-required="true"
+            aria-invalid={invalidFields.has("call_id")}
           />
           <Hint suggestedValue={suggested.call_id} actualValue={callId} />
         </div>
@@ -192,6 +220,8 @@ export function ConfirmationForm({
             onChange={(e) => setTopicId(e.target.value)}
             placeholder="HORIZON-CL5-2024-D3-02-01"
             autoComplete="off"
+            aria-required="true"
+            aria-invalid={invalidFields.has("topic_id")}
           />
           <Hint suggestedValue={suggested.topic_id} actualValue={topicId} />
         </div>
@@ -207,6 +237,8 @@ export function ConfirmationForm({
             max={2099}
             value={year}
             onChange={(e) => setYear(e.target.value)}
+            aria-required="true"
+            aria-invalid={invalidFields.has("year")}
           />
         </div>
 
@@ -238,8 +270,8 @@ export function ConfirmationForm({
         <Button type="submit" disabled={submitting}>
           {submitting ? (
             <>
-              <Loader2 className="h-4 w-4 animate-spin" />
-              Indexing…
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+              <span aria-live="polite">Indexing…</span>
             </>
           ) : (
             "Confirm and index"
@@ -253,6 +285,10 @@ export function ConfirmationForm({
   );
 }
 
+// The asterisk is decorative — aria-hidden so screen-readers don't
+// announce "asterisk" on every focused input. The semantic "required"
+// state comes from aria-required="true" on the input/trigger itself
+// plus the "is required" line in the client-error list.
 function RequiredMark() {
   return <span aria-hidden="true" className="text-destructive">*</span>;
 }

@@ -86,11 +86,20 @@ function formatTimestamp(iso: string): string {
  * step belongs in a follow-up issue (Task 3.5 covers export polish).
  */
 export function DraftPreview({ draft }: Props) {
+  const sectionLabel = humanizeSectionType(draft.section_type);
+  // AC #2 of issue #20: generated report regions get an aria-label that
+  // names the section type so a screen-reader user can identify which
+  // proposal section the draft text belongs to without scanning the
+  // surrounding heading.
   return (
-    <Card data-testid="draft-preview">
+    <Card
+      data-testid="draft-preview"
+      role="region"
+      aria-label={`Generated ${sectionLabel} draft`}
+    >
       <CardHeader>
         <CardTitle className="flex items-baseline justify-between gap-3">
-          <span>{humanizeSectionType(draft.section_type)}</span>
+          <span>{sectionLabel}</span>
           <span className="text-xs font-normal text-muted-foreground">
             {draft.citations.length} citation{draft.citations.length === 1 ? "" : "s"}
           </span>
@@ -109,7 +118,10 @@ export function DraftPreview({ draft }: Props) {
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
-        <pre className="whitespace-pre-wrap rounded-md bg-muted px-4 py-3 text-sm leading-relaxed">
+        <pre
+          aria-label={`${sectionLabel} draft text`}
+          className="whitespace-pre-wrap rounded-md bg-muted px-4 py-3 text-sm leading-relaxed"
+        >
           {draft.text}
         </pre>
         <Citations citations={draft.citations} />

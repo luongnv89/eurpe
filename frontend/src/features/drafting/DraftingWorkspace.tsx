@@ -334,10 +334,36 @@ export function DraftingWorkspace() {
     !stoppedAtCap &&
     currentIteration < effectiveMaxIterations;
 
+  // AC #1 of issue #20: which required inputs failed client-side validation,
+  // so we can flip aria-invalid on the actual control. Recompute on every
+  // render so the announce-on-correction flow works without a separate effect.
+  const invalidFields = new Set<string>();
+  if (clientErrors.length > 0) {
+    if (!sectionType) invalidFields.add("section_type");
+    if (!userIntent.trim()) invalidFields.add("user_intent");
+    const topKNum = Number.parseInt(topK, 10);
+    if (!Number.isFinite(topKNum) || topKNum < 1 || topKNum > 20) {
+      invalidFields.add("top_k");
+    }
+    const maxItNum = Number.parseInt(maxIterations, 10);
+    if (
+      !Number.isFinite(maxItNum) ||
+      maxItNum < MIN_ITERATIONS ||
+      maxItNum > MAX_ITERATIONS
+    ) {
+      invalidFields.add("max_iterations");
+    }
+  }
+
   return (
-    <div className="mx-auto w-full max-w-5xl space-y-6 p-6">
+    <section
+      aria-labelledby="drafting-heading"
+      className="mx-auto w-full max-w-5xl space-y-6 p-6"
+    >
       <header className="space-y-2">
-        <h1 className="text-3xl font-semibold tracking-tight">Draft a section</h1>
+        <h1 id="drafting-heading" className="text-3xl font-semibold tracking-tight">
+          Draft a section
+        </h1>
         <p className="text-muted-foreground">
           Pick a section type, point the workflow at one of your drafting profiles, and let
           the local LLM stitch a first pass from past-proposal evidence.
@@ -345,15 +371,15 @@ export function DraftingWorkspace() {
       </header>
 
       {enumsError && (
-        <Alert variant="destructive">
-          <AlertCircle className="h-4 w-4" />
+        <Alert variant="destructive" role="alert">
+          <AlertCircle className="h-4 w-4" aria-hidden="true" />
           <AlertTitle>Could not load form choices</AlertTitle>
           <AlertDescription>{enumsError}</AlertDescription>
         </Alert>
       )}
       {profilesError && (
-        <Alert variant="destructive">
-          <AlertCircle className="h-4 w-4" />
+        <Alert variant="destructive" role="alert">
+          <AlertCircle className="h-4 w-4" aria-hidden="true" />
           <AlertTitle>Could not load drafting profiles</AlertTitle>
           <AlertDescription>{profilesError}</AlertDescription>
         </Alert>
@@ -367,10 +393,10 @@ export function DraftingWorkspace() {
             before the request is sent.
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-6">
+        <CardContent className="space-y-6" aria-busy={generating || refining}>
           {clientErrors.length > 0 && (
-            <Alert variant="destructive">
-              <AlertCircle className="h-4 w-4" />
+            <Alert variant="destructive" role="alert">
+              <AlertCircle className="h-4 w-4" aria-hidden="true" />
               <AlertTitle>Please complete the required fields</AlertTitle>
               <AlertDescription>
                 <ul className="list-disc pl-5">
@@ -388,7 +414,11 @@ export function DraftingWorkspace() {
                 Section type <RequiredMark />
               </Label>
               <Select value={sectionType} onValueChange={setSectionType}>
-                <SelectTrigger id="section_type">
+                <SelectTrigger
+                  id="section_type"
+                  aria-required="true"
+                  aria-invalid={invalidFields.has("section_type")}
+                >
                   <SelectValue placeholder="Select a section" />
                 </SelectTrigger>
                 <SelectContent>
@@ -521,6 +551,8 @@ export function DraftingWorkspace() {
               className="min-h-[100px]"
               value={userIntent}
               onChange={(e) => setUserIntent(e.target.value)}
+              aria-required="true"
+              aria-invalid={invalidFields.has("user_intent")}
             />
           </div>
 
@@ -551,6 +583,7 @@ export function DraftingWorkspace() {
                 max={20}
                 value={topK}
                 onChange={(e) => setTopK(e.target.value)}
+                aria-invalid={invalidFields.has("top_k")}
               />
             </div>
 
@@ -564,6 +597,7 @@ export function DraftingWorkspace() {
                 value={maxIterations}
                 onChange={(e) => setMaxIterations(e.target.value)}
                 aria-describedby="max_iterations_help"
+                aria-invalid={invalidFields.has("max_iterations")}
               />
               <p id="max_iterations_help" className="text-xs text-muted-foreground">
                 {MIN_ITERATIONS}-{MAX_ITERATIONS}. Default 3. Use the Refine
@@ -575,7 +609,7 @@ export function DraftingWorkspace() {
               <label className="flex items-center gap-2 text-sm">
                 <input
                   type="checkbox"
-                  className="h-4 w-4 rounded border-input"
+                  className="h-4 w-4 rounded border-input focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                   checked={lessonsLearned}
                   onChange={(e) => setLessonsLearned(e.target.checked)}
                 />
@@ -585,11 +619,17 @@ export function DraftingWorkspace() {
           </div>
 
           {serverError && (
-            <Alert variant="destructive">
-              <AlertCircle className="h-4 w-4" />
+            <Alert variant="destructive" role="alert">
+              <AlertCircle className="h-4 w-4" aria-hidden="true" />
               <AlertTitle>Generation failed</AlertTitle>
               <AlertDescription>{serverError}</AlertDescription>
             </Alert>
+          )}
+
+          {generating && (
+            <p role="status" aria-live="polite" className="sr-only">
+              Generating draft, please wait.
+            </p>
           )}
 
           <div className="flex flex-wrap items-center justify-end gap-2">
@@ -603,12 +643,12 @@ export function DraftingWorkspace() {
             >
               {generating ? (
                 <>
-                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
                   Generating…
                 </>
               ) : (
                 <>
-                  <Sparkles className="h-4 w-4" />
+                  <Sparkles className="h-4 w-4" aria-hidden="true" />
                   Generate draft
                 </>
               )}
@@ -621,13 +661,20 @@ export function DraftingWorkspace() {
       </Card>
 
       {draft && (
-        <section aria-label="Generated draft" className="space-y-4">
+        <section
+          aria-labelledby="generated-draft-heading"
+          aria-busy={refining}
+          className="space-y-4"
+        >
           <div className="flex flex-wrap items-end justify-between gap-3">
             <div>
-              <h2 className="text-2xl font-semibold tracking-tight">
+              <h2
+                id="generated-draft-heading"
+                className="text-2xl font-semibold tracking-tight"
+              >
                 2. Review the draft
               </h2>
-              <p className="text-sm text-muted-foreground">
+              <p className="text-sm text-muted-foreground" aria-live="polite">
                 Iteration {currentIteration} of {effectiveMaxIterations}
                 {accepted && " — accepted"}
                 {stoppedAtCap && !accepted && " — iteration cap reached"}
@@ -644,7 +691,7 @@ export function DraftingWorkspace() {
                 disabled={accepted || refining}
                 aria-label="Accept this draft and stop the critic loop"
               >
-                <CheckCircle2 className="h-4 w-4" />
+                <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
                 {accepted ? "Accepted" : "Accept draft"}
               </Button>
               <Button
@@ -655,12 +702,12 @@ export function DraftingWorkspace() {
               >
                 {refining ? (
                   <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
                     Refining…
                   </>
                 ) : (
                   <>
-                    <RefreshCw className="h-4 w-4" />
+                    <RefreshCw className="h-4 w-4" aria-hidden="true" />
                     Refine ({currentIteration}/{effectiveMaxIterations})
                   </>
                 )}
@@ -668,8 +715,8 @@ export function DraftingWorkspace() {
             </div>
           </div>
           {stoppedAtCap && !accepted && (
-            <Alert>
-              <AlertCircle className="h-4 w-4" />
+            <Alert role="status" aria-live="polite">
+              <AlertCircle className="h-4 w-4" aria-hidden="true" />
               <AlertTitle>Iteration cap reached</AlertTitle>
               <AlertDescription>
                 You have used all {effectiveMaxIterations} configured critic
@@ -681,7 +728,7 @@ export function DraftingWorkspace() {
           <DraftPreview draft={draft} />
         </section>
       )}
-    </div>
+    </section>
   );
 }
 
