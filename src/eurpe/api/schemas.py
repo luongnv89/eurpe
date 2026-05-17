@@ -29,7 +29,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from eurpe.schema import Programme, SourceStatus
+from eurpe.schema import Programme, SectionType, SourceStatus
 
 
 class ParseResponse(BaseModel):
@@ -158,3 +158,173 @@ class EnumsResponse(BaseModel):
 
     programme: list[str] = Field(description="Programme enum values.")
     source_status: list[str] = Field(description="SourceStatus enum values.")
+
+
+# ---------------------------------------------------------------------------
+# Section drafting (Task 3.1 / issue #15)
+# ---------------------------------------------------------------------------
+
+
+class GenerationEnumsResponse(BaseModel):
+    """Closed enum vocabularies the drafting UI Selects must use.
+
+    Mirrors :class:`EnumsResponse` for the ingestion form but exposes
+    the enums the section-drafting workspace needs: which section types
+    can be drafted, and which programme filters are available. Sourced
+    from the Python enums directly so the UI never hand-types a string
+    that could drift away from the model.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    section_type: list[str] = Field(description="SectionType enum values.")
+    programme: list[str] = Field(description="Programme enum values.")
+
+
+class DraftingProfileSummary(BaseModel):
+    """One drafting profile entry exposed to the UI Select.
+
+    ``programme`` is the enum value (e.g. ``horizon_europe``) so the UI
+    can post it back unchanged to ``POST /api/generation/section`` as
+    ``profile_programme``. ``name`` is the human-readable label rendered
+    in the Select option.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    programme: Programme = Field(description="Programme this profile applies to.")
+    name: str = Field(min_length=1, description="Human-readable profile name.")
+
+
+class ProfilesResponse(BaseModel):
+    """``GET /api/generation/profiles`` — list of available drafting profiles."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    profiles: list[DraftingProfileSummary] = Field(
+        default_factory=list,
+        description=(
+            "Drafting profiles bundled with this build. Empty list is a "
+            "legal state — the workflow falls back to generic guidance "
+            "when no profile is selected."
+        ),
+    )
+
+
+class GenerateSectionRequest(BaseModel):
+    """Operator-facing wire model for ``POST /api/generation/section``.
+
+    Mirrors only the fields the React workspace lets the user edit. The
+    server constructs :class:`~eurpe.generation.GenerationRequest` from
+    these values inside the route handler so the public wire surface
+    stays narrow and stable.
+
+    Empty / incomplete inputs are rejected at the boundary so AC #4
+    ("Empty or incomplete inputs show actionable validation messages")
+    fires server-side too — the React client validates first, but a
+    bypassed client must still get a clean 422.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    section_type: SectionType = Field(
+        description=(
+            "Which section to draft. Must be one of the values "
+            "advertised by ``GET /api/generation/enums``."
+        ),
+    )
+    user_intent: str = Field(
+        min_length=1,
+        description=(
+            "What the user wants this section to communicate. The single "
+            "most important free-text field — drives retrieval and is "
+            "quoted verbatim in the prompt."
+        ),
+    )
+    call_context: str = Field(
+        default="",
+        description=(
+            "Optional pasted call / topic text. Free-text. Passed verbatim "
+            "to the generation workflow."
+        ),
+    )
+    target_programme: Programme | None = Field(
+        default=None,
+        description=(
+            "Optional programme filter for retrieval. ``None`` retrieves "
+            "across all programmes."
+        ),
+    )
+    profile_programme: Programme | None = Field(
+        default=None,
+        description=(
+            "Programme whose drafting profile should be applied. The "
+            "service resolves this via :func:`load_profile`. ``None`` "
+            "uses the workflow's generic guidance."
+        ),
+    )
+    top_k_examples: int = Field(
+        default=5,
+        ge=1,
+        le=20,
+        description=(
+            "Number of past-proposal examples to retrieve. Mirrors the "
+            "workflow's per-call top_k_examples knob."
+        ),
+    )
+    lessons_learned: bool = Field(
+        default=False,
+        description=(
+            "Surface rejected examples more aggressively as cautionary "
+            "evidence. Mirrors the workflow's per-call lessons_learned "
+            "override."
+        ),
+    )
+
+
+class CitationPayload(BaseModel):
+    """One citation rendered alongside the draft.
+
+    Flat shape (not nested) so the React client can render a table row
+    per entry without unwrapping nested objects. Field names mirror
+    :class:`eurpe.generation.CitationRef` so the wire format is a
+    direct serialisation of the workflow's structured output.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    citation_id: int = Field(ge=1, description="1-indexed marker [N] in draft text.")
+    source_status: SourceStatus = Field(description="Provenance label of the cited chunk.")
+    programme: Programme = Field(description="Programme of the cited proposal's call.")
+    call_id: str = Field(min_length=1, description="Call identifier.")
+    proposal_title: str | None = Field(default=None, description="Title of the cited proposal.")
+    section_heading: str | None = Field(default=None, description="Source section heading.")
+    page: int | None = Field(default=None, ge=1, description="1-indexed source page number.")
+    chunk_id: str = Field(min_length=1, description="Stable chunk identifier.")
+    snippet: str = Field(description="Short excerpt of the source chunk.")
+
+
+class GenerateSectionResponse(BaseModel):
+    """``POST /api/generation/section`` — generated draft + citations.
+
+    ``text`` is markdown the React client renders to the operator;
+    ``citations`` is the 1-to-1 list of ``[N]`` references the LLM used.
+    ``model`` and ``drafting_profile`` are returned for the audit footer
+    the UI displays under the draft so the operator can verify *which*
+    model and profile shaped the output without inspecting logs.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    section_type: SectionType = Field(description="Section that was drafted.")
+    text: str = Field(min_length=1, description="Generated draft markdown.")
+    citations: list[CitationPayload] = Field(
+        default_factory=list,
+        description="Citations referenced by the draft. May be empty.",
+    )
+    model: str = Field(min_length=1, description="LLM identifier that produced the draft.")
+    generated_at: datetime = Field(description="UTC timestamp when the draft was assembled.")
+    drafting_profile: str | None = Field(
+        default=None,
+        description="Profile applied to the draft, when one was selected.",
+    )

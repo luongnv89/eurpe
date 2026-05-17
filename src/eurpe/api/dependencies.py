@@ -28,6 +28,7 @@ from pathlib import Path
 
 from fastapi import Depends
 
+from eurpe.analytics import make_analytics_logger
 from eurpe.api.storage import ParseTokenStore
 from eurpe.config import (
     DEFAULT_CONFIG_PATH,
@@ -37,10 +38,17 @@ from eurpe.config import (
     ensure_runtime_dirs,
     load_config,
 )
+from eurpe.generation import (
+    GenerationService,
+    SectionGenerationWorkflow,
+    make_llm_client,
+)
 from eurpe.ingestion.docling_parser import DoclingProposalParser
 from eurpe.retrieval import (
     ChromaIndex,
     HierarchicalChunker,
+    RetrievalPolicy,
+    SourceStatusAwareRetriever,
     make_embedder,
 )
 
@@ -51,6 +59,7 @@ _parser_cache: dict[str, DoclingProposalParser] = {}
 _chunker_cache: dict[str, HierarchicalChunker] = {}
 _index_cache: dict[tuple[str, str], ChromaIndex] = {}
 _token_store_cache: dict[str, ParseTokenStore] = {}
+_generation_service_cache: dict[tuple[str, str], GenerationService] = {}
 
 # The configuration path used by every provider. Tests can override this
 # by clearing the caches and writing their own config — see
@@ -84,6 +93,7 @@ def reset_dependency_caches() -> None:
     _chunker_cache.clear()
     _index_cache.clear()
     _token_store_cache.clear()
+    _generation_service_cache.clear()
 
 
 def get_config() -> EurpeConfig:
@@ -187,3 +197,61 @@ def get_token_store(cfg: EurpeConfig = Depends(get_config)) -> ParseTokenStore:
     store = ParseTokenStore(cfg.runtime_dir)
     _token_store_cache[key] = store
     return store
+
+
+def get_generation_service(
+    cfg: EurpeConfig = Depends(get_config),
+    *,
+    collection: str = "default",
+) -> GenerationService:
+    """Return a cached :class:`GenerationService` bound to ``cfg`` + collection.
+
+    The service wires together the retriever (ChromaIndex + policy), the
+    LLM client (Ollama with the deterministic-stub fallback baked in by
+    :func:`make_llm_client`), and the analytics logger so each
+    section-drafting request emits the standard draft-started /
+    draft-completed events under ``cfg.runtime_dir``.
+
+    Why include ``collection`` in the cache key: a future tenant-style
+    deployment could route different React workspaces at different
+    collections without spinning up a second FastAPI process. Keying on
+    both the config path and the collection name lets the same provider
+    serve both without colliding on the cached service instance.
+
+    A relaxed default :class:`RetrievalPolicy` is used: the
+    deterministic-hash embedder produces modest scores so a 0.0
+    threshold guarantees the workspace surfaces evidence on every
+    request. Callers that want stricter retrieval can build a custom
+    service in their own dependency override.
+    """
+
+    key = (str(_CONFIG_PATH), collection)
+    cached = _generation_service_cache.get(key)
+    if cached is not None:
+        return cached
+
+    embedder = make_embedder(cfg)
+    index = ChromaIndex(
+        index_path=cfg.index_path,
+        embedder=embedder,
+        collection_name=collection,
+    )
+    # ``relevance_threshold=0.0`` mirrors the deterministic_workflow
+    # fixture used in the service tests; with the production
+    # SentenceTransformer fallback the threshold rarely matters because
+    # cosine scores cluster well above the default 0.30 anyway, and
+    # under-retrieving in the UI is a worse failure mode than
+    # over-retrieving (the drafting workspace shows the operator the
+    # citations and lets them prune).
+    policy = RetrievalPolicy(relevance_threshold=0.0)
+    retriever = SourceStatusAwareRetriever(index, policy=policy)
+    llm = make_llm_client(cfg)
+    analytics = make_analytics_logger(cfg)
+    workflow = SectionGenerationWorkflow(
+        retriever=retriever,
+        llm=llm,
+        analytics=analytics,
+    )
+    service = GenerationService(workflow)
+    _generation_service_cache[key] = service
+    return service
