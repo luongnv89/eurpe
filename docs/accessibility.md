@@ -19,6 +19,10 @@ gaps that remain.
 - **Skip-to-main-content link** is rendered first on every view
   (`frontend/src/App.tsx::SkipLink`). It is `sr-only` until focused, at
   which point it appears as a top-left chip with a visible ring.
+  The `<main id="main-content">` element carries `tabIndex={-1}` and
+  `outline-none` so the fragment jump actually moves keyboard focus
+  into the content (Safari and older Firefox otherwise keep focus on
+  the link itself).
 - **Visible focus ring** is built into the shadcn primitives the app
   uses: every `Button`, `Input`, `Textarea`, and `SelectTrigger` carries
   `focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2`
@@ -97,6 +101,7 @@ text (≥18 pt or 14 pt bold).
 | `--muted-foreground` on `--background` | `215.4 16.3% 46.9%` | 4.75:1 | `215.4 16.3% 38%` | **6.58:1** | 4.5 | PASS (AAA) |
 | `--primary-foreground` on `--primary` | `210 40% 98%` on `222.2 47.4% 11.2%` | 17.04:1 | unchanged | 17.04:1 | 4.5 | PASS (AAA) |
 | `--destructive-foreground` on `--destructive` | `210 40% 98%` on `0 84.2% 60.2%` | 3.59:1 | `0 72% 45%` | **5.55:1** | 4.5 | PASS (AA) |
+| `text-destructive` on `--background` | `0 84.2% 60.2%` | 3.76:1 | `0 72% 45%` | **5.81:1** | 4.5 | PASS (AA) |
 | `--ring` on `--background` | `222.2 84% 4.9%` | 19.99:1 | unchanged | 19.99:1 | 3 | PASS |
 | `--border` on `--background` | `214.3 31.8% 91.4%` | ~1.27:1 | unchanged | ~1.27:1 | 3* | NOTE (see below) |
 

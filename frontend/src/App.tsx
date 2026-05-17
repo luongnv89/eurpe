@@ -23,7 +23,7 @@ export default function App() {
       <>
         <SkipLink />
         <TopBar onHome={() => setView("home")} />
-        <main id="main-content" className="min-h-screen bg-background">
+        <main id="main-content" tabIndex={-1} className="min-h-screen bg-background outline-none">
           <IngestWizard />
         </main>
       </>
@@ -35,7 +35,7 @@ export default function App() {
       <>
         <SkipLink />
         <TopBar onHome={() => setView("home")} />
-        <main id="main-content" className="min-h-screen bg-background">
+        <main id="main-content" tabIndex={-1} className="min-h-screen bg-background outline-none">
           <DraftingWorkspace />
         </main>
       </>
@@ -47,7 +47,8 @@ export default function App() {
       <SkipLink />
       <main
         id="main-content"
-        className="min-h-screen flex flex-col items-center justify-center p-8"
+        tabIndex={-1}
+        className="min-h-screen flex flex-col items-center justify-center p-8 outline-none"
       >
         <div className="max-w-xl text-center space-y-6">
           <div className="inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs text-muted-foreground">
