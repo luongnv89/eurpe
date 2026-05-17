@@ -266,9 +266,7 @@ def test_retrieval_benchmark_with_default_probes(
 ) -> None:
     """The five default probes shipped with the harness all return non-empty."""
 
-    result = RetrievalBenchmark(seeded_retriever).measure(
-        _DEFAULT_RETRIEVAL_PROBES, top_k=5
-    )
+    result = RetrievalBenchmark(seeded_retriever).measure(_DEFAULT_RETRIEVAL_PROBES, top_k=5)
     assert result.query_count == len(_DEFAULT_RETRIEVAL_PROBES)
     assert result.result_count_avg > 0.0
 
@@ -326,9 +324,7 @@ def test_run_all_produces_complete_report(tmp_path: Path, no_network: None) -> N
     assert report.runtime.platform
 
 
-def test_run_all_supports_custom_corpus_and_probes(
-    tmp_path: Path, no_network: None
-) -> None:
+def test_run_all_supports_custom_corpus_and_probes(tmp_path: Path, no_network: None) -> None:
     """Caller-supplied corpus + probes flow through to the measurements."""
 
     custom_corpus = build_synthetic_corpus(proposal_count=2, sections_per_proposal=3)

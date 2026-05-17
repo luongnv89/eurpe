@@ -187,9 +187,7 @@ def _print_indexing(report: BenchmarkReport) -> None:
     typer.echo(f"  elapsed_ms      : {m.elapsed_ms}")
     typer.echo(f"  per_proposal_ms : {m.per_proposal_ms_avg:.2f}")
     typer.echo(f"  chunks_per_sec  : {m.chunks_per_second:.2f}")
-    typer.echo(
-        "  PRD target      : <2 hours on Mac M1 32 GB for 40 proposals"
-    )
+    typer.echo("  PRD target      : <2 hours on Mac M1 32 GB for 40 proposals")
     typer.echo("")
 
 
@@ -220,9 +218,7 @@ def _print_generation(report: BenchmarkReport) -> None:
     typer.echo(f"  citation_count  : {m.citation_count}")
     typer.echo(f"  prompt_length   : {m.prompt_length}")
     typer.echo(f"  draft_length    : {m.draft_length}")
-    typer.echo(
-        "  PRD target      : <2 min on M1, <30 s on DGX (5–10 page section)"
-    )
+    typer.echo("  PRD target      : <2 min on M1, <30 s on DGX (5–10 page section)")
     typer.echo("")
 
 
@@ -383,9 +379,7 @@ def benchmark_indexing(
         measurement = IndexingBenchmark(chunker=chunker, index=index).measure(corpus)
 
     report = BenchmarkReport(
-        runtime=capture_runtime_fingerprint(
-            runtime=runtime_label, llm=llm, embedder=embedder
-        ),
+        runtime=capture_runtime_fingerprint(runtime=runtime_label, llm=llm, embedder=embedder),
         indexing=measurement,
     )
     _print_runtime(report)
@@ -457,14 +451,10 @@ def benchmark_retrieval(
         retriever = SourceStatusAwareRetriever(index, policy=policy)
         from eurpe.benchmarks.runner import _DEFAULT_RETRIEVAL_PROBES  # noqa: PLC0415
 
-        measurement = RetrievalBenchmark(retriever).measure(
-            _DEFAULT_RETRIEVAL_PROBES, top_k=top_k
-        )
+        measurement = RetrievalBenchmark(retriever).measure(_DEFAULT_RETRIEVAL_PROBES, top_k=top_k)
 
     report = BenchmarkReport(
-        runtime=capture_runtime_fingerprint(
-            runtime=runtime_label, llm=llm, embedder=embedder
-        ),
+        runtime=capture_runtime_fingerprint(runtime=runtime_label, llm=llm, embedder=embedder),
         retrieval=measurement,
     )
     _print_runtime(report)
@@ -547,9 +537,7 @@ def benchmark_generation(
         measurement = GenerationBenchmark(workflow).measure(request=request)
 
     report = BenchmarkReport(
-        runtime=capture_runtime_fingerprint(
-            runtime=runtime_label, llm=llm, embedder=embedder
-        ),
+        runtime=capture_runtime_fingerprint(runtime=runtime_label, llm=llm, embedder=embedder),
         generation=measurement,
     )
     _print_runtime(report)

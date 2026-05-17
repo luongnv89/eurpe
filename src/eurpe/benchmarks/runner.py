@@ -261,9 +261,7 @@ def build_synthetic_corpus(
     if proposal_count < 1:
         raise ValueError(f"proposal_count must be >= 1, got {proposal_count}")
     if sections_per_proposal < 1:
-        raise ValueError(
-            f"sections_per_proposal must be >= 1, got {sections_per_proposal}"
-        )
+        raise ValueError(f"sections_per_proposal must be >= 1, got {sections_per_proposal}")
     return [
         (
             _synthetic_parsed_proposal(
@@ -345,8 +343,7 @@ class RetrievalMeasurement(BaseModel):
     elapsed_ms_p95: int = Field(
         ge=0,
         description=(
-            "95th percentile query latency, ms. Headline number for "
-            "the PRD's '<2 s top-k' target."
+            "95th percentile query latency, ms. Headline number for the PRD's '<2 s top-k' target."
         ),
     )
     elapsed_ms_max: int = Field(ge=0, description="Slowest query, ms.")
