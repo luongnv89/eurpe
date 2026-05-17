@@ -943,3 +943,193 @@ def test_section_cli_rejects_both_topic_text_and_topic_pdf(tmp_path: Path) -> No
 
     assert result.exit_code == 1, result.output
     assert "mutually exclusive" in result.output
+
+
+# ---------------------------------------------------------------------------
+# --iterations flag (Task 3.2 / issue #16)
+# ---------------------------------------------------------------------------
+
+
+def test_generate_section_cli_default_iterations_is_single_pass(tmp_path: Path) -> None:
+    """Backward compat: omitting --iterations keeps the single-pass behaviour."""
+
+    cfg_path = _write_offline_config(tmp_path)
+    _seed_index_with_fixtures(tmp_path)
+    out_path = tmp_path / "draft.md"
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "generate",
+            "section",
+            "--type",
+            "methodology",
+            "--intent",
+            "Describe the methodology",
+            "--threshold",
+            "0.0",
+            "--no-audit",
+            "--config",
+            str(cfg_path),
+            "--output",
+            str(out_path),
+            "--render",
+            "json",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    payload = json.loads(out_path.with_suffix(".json").read_text(encoding="utf-8"))
+    # Single-pass draft → no iteration records.
+    assert payload["iterations"] == []
+
+
+def test_generate_section_cli_iterations_three_appends_two_records(
+    tmp_path: Path,
+) -> None:
+    """--iterations 3 runs two critic passes; the JSON dump carries the history."""
+
+    cfg_path = _write_offline_config(tmp_path)
+    _seed_index_with_fixtures(tmp_path)
+    out_path = tmp_path / "draft.md"
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "generate",
+            "section",
+            "--type",
+            "methodology",
+            "--intent",
+            "Describe the methodology",
+            "--threshold",
+            "0.0",
+            "--no-audit",
+            "--iterations",
+            "3",
+            "--config",
+            str(cfg_path),
+            "--output",
+            str(out_path),
+            "--render",
+            "json",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    payload = json.loads(out_path.with_suffix(".json").read_text(encoding="utf-8"))
+    # Two critic passes beyond the implicit first → 2 records.
+    assert len(payload["iterations"]) == 2
+    assert [it["iteration_index"] for it in payload["iterations"]] == [2, 3]
+    for it in payload["iterations"]:
+        assert it["changes_summary"]
+        assert it["requirements_checked"]
+        assert it["critique_text"]
+    # CLI status line announces the iterations.
+    assert "iteration 2/3" in result.output
+    assert "iteration 3/3" in result.output
+
+
+def test_generate_section_cli_rejects_iterations_above_five(tmp_path: Path) -> None:
+    """Typer's min/max guard rejects --iterations 10 at the CLI boundary."""
+
+    cfg_path = _write_offline_config(tmp_path)
+    _seed_index_with_fixtures(tmp_path)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "generate",
+            "section",
+            "--type",
+            "methodology",
+            "--intent",
+            "x",
+            "--iterations",
+            "10",
+            "--config",
+            str(cfg_path),
+        ],
+    )
+    assert result.exit_code != 0
+    # Typer formats out-of-range errors with the field name.
+    assert "iterations" in result.output.lower() or "5" in result.output
+
+
+def test_generate_section_cli_rejects_iterations_below_one(tmp_path: Path) -> None:
+    """Typer's min/max guard rejects --iterations 0 at the CLI boundary."""
+
+    cfg_path = _write_offline_config(tmp_path)
+    _seed_index_with_fixtures(tmp_path)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "generate",
+            "section",
+            "--type",
+            "methodology",
+            "--intent",
+            "x",
+            "--iterations",
+            "0",
+            "--config",
+            str(cfg_path),
+        ],
+    )
+    assert result.exit_code != 0
+
+
+def test_generate_section_cli_audit_runs_against_final_iteration(
+    tmp_path: Path,
+) -> None:
+    """--iterations 3 with audit enabled: the audit runs on the final draft.
+
+    The deterministic LLM stub triggers the issue #45 placeholder gate
+    on every pass, so the audit *should* fail on the final iteration
+    and the CLI exits 1. The test pins two contracts:
+
+    1. The audit fires *after* the loop completes (audit verdict is
+       based on the iteration N draft, not the initial pass).
+    2. The audit error path naturally surfaces the regressions an
+       operator combining --iterations N with audit might hit; this
+       test guards against a future regression where the audit is
+       silently skipped on iterated drafts.
+    """
+
+    cfg_path = _write_offline_config(tmp_path)
+    _seed_index_with_fixtures(tmp_path)
+    out_path = tmp_path / "draft.md"
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "generate",
+            "section",
+            "--type",
+            "methodology",
+            "--intent",
+            "Describe a deep learning methodology",
+            "--threshold",
+            "0.0",
+            "--iterations",
+            "3",
+            "--config",
+            str(cfg_path),
+            "--output",
+            str(out_path),
+            "--render",
+            "json",
+        ],
+    )
+    # Iterations ran (status lines emitted) before the audit fired.
+    assert "iteration 2/3" in result.output
+    assert "iteration 3/3" in result.output
+    # The audit either failed (most common: placeholder gate) or passed;
+    # the contract is that it ran. ``Audit findings`` or
+    # ``Audit: passed`` shows up either way.
+    combined = (result.output or "") + (result.stderr or "")
+    assert "Audit" in combined

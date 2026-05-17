@@ -52,14 +52,21 @@ from eurpe.api.schemas import (
     GenerateSectionRequest,
     GenerateSectionResponse,
     GenerationEnumsResponse,
+    IterateSectionRequest,
+    IterateSectionResponse,
+    IterationRecordPayload,
     ProfilesResponse,
 )
 from eurpe.generation import (
+    CitationRef,
+    GenerationDraft,
     GenerationError,
     GenerationRequest,
     GenerationService,
+    IterationRecord,
     LLMUnavailableError,
     SectionGenerationRequest,
+    SectionIterationRequest,
 )
 from eurpe.generation.profiles import list_available_profiles, load_profile
 from eurpe.schema import Programme, SectionType
@@ -174,6 +181,20 @@ def generate_section(
             detail=f"failed to load drafting profile: {exc}",
         ) from exc
 
+    return _draft_to_response(draft)
+
+
+def _draft_to_response(draft: GenerationDraft) -> GenerateSectionResponse:
+    """Convert an internal :class:`GenerationDraft` into the wire response.
+
+    Shared helper so the :func:`generate_section` and
+    :func:`iterate_section` routes serialise drafts identically (and a
+    future ``GET /api/generation/section/{id}`` would too). Mirrors
+    the inverse of :func:`_request_to_internal` below — both keep the
+    wire surface stable while the workflow's internal field set
+    evolves.
+    """
+
     citations = [
         CitationPayload(
             citation_id=c.citation_id,
@@ -188,6 +209,16 @@ def generate_section(
         )
         for c in draft.citations
     ]
+    iterations = [
+        IterationRecordPayload(
+            iteration_index=it.iteration_index,
+            changes_summary=it.changes_summary,
+            requirements_checked=list(it.requirements_checked),
+            critique_text=it.critique_text,
+            generated_at=it.generated_at,
+        )
+        for it in draft.iterations
+    ]
     return GenerateSectionResponse(
         section_type=draft.section_type,
         text=draft.text,
@@ -195,4 +226,125 @@ def generate_section(
         model=draft.model,
         generated_at=draft.generated_at,
         drafting_profile=draft.drafting_profile,
+        iterations=iterations,
+    )
+
+
+def _response_to_draft(payload: GenerateSectionResponse) -> GenerationDraft:
+    """Rehydrate a wire :class:`GenerateSectionResponse` into a :class:`GenerationDraft`.
+
+    Used by :func:`iterate_section` to turn the client-supplied
+    ``prior_draft`` back into the internal :class:`GenerationDraft`
+    the critic loop expects. The rehydrated draft is the *minimum*
+    needed by the loop (text, citations, section_type, iterations);
+    other internal fields (``prompt_used``, ``request``, ``topic_context``)
+    are reconstructed from the matching iterate request so the loop
+    can compose the augmented request without storing them.
+    """
+
+    citations = [
+        CitationRef(
+            citation_id=c.citation_id,
+            source_status=c.source_status,
+            programme=c.programme,
+            call_id=c.call_id,
+            proposal_title=c.proposal_title,
+            section_heading=c.section_heading,
+            page=c.page,
+            chunk_id=c.chunk_id,
+            snippet=c.snippet,
+        )
+        for c in payload.citations
+    ]
+    iterations = [
+        IterationRecord(
+            iteration_index=it.iteration_index,
+            changes_summary=it.changes_summary,
+            requirements_checked=list(it.requirements_checked),
+            critique_text=it.critique_text,
+            generated_at=it.generated_at,
+        )
+        for it in payload.iterations
+    ]
+    # ``prompt_used`` and ``request`` are populated with stub values that
+    # satisfy GenerationDraft's invariants. The critic loop only reads
+    # ``text`` / ``citations`` / ``section_type`` / ``iterations`` from
+    # the prior draft, so the stubs never leak into output (the refined
+    # draft carries the fresh prompt from the regeneration step).
+    placeholder_request = GenerationRequest(
+        section_type=payload.section_type,
+        user_intent="(rehydrated — original intent supplied in IterateSectionRequest)",
+    )
+    return GenerationDraft(
+        section_type=payload.section_type,
+        text=payload.text,
+        citations=citations,
+        prompt_used="(prior prompt — not echoed by the wire response)",
+        model=payload.model,
+        generated_at=payload.generated_at,
+        request=placeholder_request,
+        drafting_profile=payload.drafting_profile,
+        iterations=iterations,
+    )
+
+
+@router.post("/section/iterate", response_model=IterateSectionResponse)
+def iterate_section(
+    body: IterateSectionRequest,
+    service: GenerationService = Depends(get_generation_service),
+) -> IterateSectionResponse:
+    """Run one critic+regenerate iteration on top of the supplied prior draft.
+
+    AC #1 of issue #16 ("user can set critic iterations between 1 and
+    5") is enforced at the Pydantic boundary on
+    :attr:`IterateSectionRequest.max_iterations`. AC #2 ("user can stop
+    the loop after any completed iteration") is satisfied by the
+    per-iteration shape of this endpoint — the client simply stops
+    calling. AC #3 ("each iteration records what changed and which
+    call/profile requirements were checked") is delivered by the
+    :class:`IterationRecordPayload` appended to the returned draft's
+    ``iterations`` list.
+
+    Error mapping mirrors :func:`generate_section`.
+    """
+
+    workflow_request = GenerationRequest(
+        section_type=body.section_type,
+        user_intent=body.user_intent,
+        call_context=body.call_context,
+        target_programme=body.target_programme,
+        top_k_examples=body.top_k_examples,
+        lessons_learned=body.lessons_learned,
+    )
+    prior_draft = _response_to_draft(body.prior_draft)
+    iteration_request = SectionIterationRequest(
+        request=workflow_request,
+        profile_programme=body.profile_programme,
+        prior_draft=prior_draft,
+        max_iterations=body.max_iterations,
+    )
+
+    try:
+        result = service.iterate_section(iteration_request)
+    except LLMUnavailableError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"LLM unavailable: {exc}",
+        ) from exc
+    except GenerationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"iteration failed: {exc}",
+        ) from exc
+    except (FileNotFoundError, ValueError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"failed to load drafting profile: {exc}",
+        ) from exc
+
+    return IterateSectionResponse(
+        draft=_draft_to_response(result.draft),
+        iteration_index=result.iteration_index,
+        max_iterations=result.max_iterations,
+        stopped=result.stopped,
     )

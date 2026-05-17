@@ -154,6 +154,7 @@ class SectionGenerationWorkflow:
         request: GenerationRequest,
         *,
         profile: DraftingProfile | None = None,
+        iteration_count: int = 1,
     ) -> GenerationDraft:
         """Drive the full pipeline for one request and return a :class:`GenerationDraft`.
 
@@ -175,6 +176,14 @@ class SectionGenerationWorkflow:
         If ``profile`` is provided, programme-specific section guidance
         and expected outputs are used. The profile name is recorded in
         the draft for audit and traceability.
+
+        ``iteration_count`` is recorded on the
+        :class:`DraftCompletedEvent` emitted at the end of the run.
+        The single-pass entry point (Sprint 1 / issue #6) leaves it at
+        the default ``1``; the Sprint 3 critic loop (issue #16) passes
+        the 1-indexed iteration number through so the analytics log
+        carries per-iteration counts. Content-safe: only the integer
+        crosses the analytics boundary — never the critique text.
 
         Errors:
 
@@ -199,6 +208,7 @@ class SectionGenerationWorkflow:
             citations=citations,
             generation_time_ms=generation_time_ms,
             profile=profile,
+            iteration_count=iteration_count,
         )
 
         return GenerationDraft(
@@ -351,6 +361,7 @@ class SectionGenerationWorkflow:
         citations: list[CitationRef],
         generation_time_ms: int,
         profile: DraftingProfile | None,
+        iteration_count: int = 1,
     ) -> None:
         """Emit a :class:`DraftCompletedEvent` if an analytics logger is configured.
 
@@ -358,6 +369,13 @@ class SectionGenerationWorkflow:
         plain string-keyed dict — content-free, only the counts of
         each ``SourceStatus`` label. The draft text and citation
         snippets are NEVER passed to the event.
+
+        ``iteration_count`` is the 1-indexed iteration number that
+        produced this draft. Defaults to 1 for the Sprint 1 single-
+        pass workflow; the Sprint 3 critic loop passes 2, 3, ... so
+        the analytics log carries one event per iteration with the
+        correct count. Privacy contract: only the integer is logged
+        — never the critique text.
 
         Wrapped in ``try/except`` so an analytics failure here cannot
         break the workflow returning its draft to the caller.
@@ -375,6 +393,7 @@ class SectionGenerationWorkflow:
                 source_status_mix=dict(mix),
                 model=self._llm.model,
                 drafting_profile=profile.name if profile is not None else None,
+                iteration_count=iteration_count,
             )
             self._analytics.log(event)
         except Exception as exc:  # pragma: no cover - defensive

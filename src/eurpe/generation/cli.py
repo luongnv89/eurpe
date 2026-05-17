@@ -48,9 +48,15 @@ from eurpe.config import (
     load_config,
 )
 from eurpe.generation.audit import AuditResult, CitationAudit
+from eurpe.generation.critic import CriticAgent
+from eurpe.generation.critic_loop import (
+    MAX_ITERATIONS_CEILING,
+    CriticLoopWorkflow,
+)
 from eurpe.generation.errors import GenerationError, LLMUnavailableError
 from eurpe.generation.llm import make_llm_client
 from eurpe.generation.models import GenerationDraft, GenerationRequest
+from eurpe.generation.profiles import DraftingProfile, load_profile
 from eurpe.generation.render import MarkdownCitationRenderer
 from eurpe.generation.workflow import SectionGenerationWorkflow
 from eurpe.ingestion.errors import IngestionError
@@ -343,6 +349,31 @@ def section(
         "--collection",
         help="Chroma collection name to retrieve from.",
     ),
+    iterations: int = typer.Option(
+        1,
+        "--iterations",
+        min=1,
+        max=MAX_ITERATIONS_CEILING,
+        help=(
+            "Number of total drafting passes (1-5). Default 1 (single-pass — "
+            "backward compatible). Set >1 to enable the Task 3.2 critic loop: "
+            "each additional iteration runs a critic over the prior draft "
+            "and regenerates with the critique woven into the intent. The "
+            "issue body recommends 3 as a working default for interactive use. "
+            "AC #2 (stop after any iteration) — interrupt with Ctrl+C between "
+            "iterations; the most recent completed draft is what was written to "
+            "stdout / disk."
+        ),
+    ),
+    profile_programme: str | None = typer.Option(
+        None,
+        "--profile-programme",
+        help=(
+            "Programme whose drafting profile to apply (e.g., horizon_europe). "
+            "When set, the same profile drives both the initial draft and "
+            "every critic iteration so the requirements list stays consistent."
+        ),
+    ),
 ) -> None:
     """Generate a draft of one section using indexed past-proposal evidence."""
 
@@ -399,6 +430,28 @@ def section(
 
     llm = make_llm_client(cfg)
     workflow = SectionGenerationWorkflow(retriever=retriever, llm=llm, analytics=analytics)
+    # The critic loop reuses the same LLM client for critique by default.
+    # See ``GenerationService`` for the rationale; the CLI mirrors that
+    # convention so a single ``ollama pull`` is enough to run the loop.
+    critic_loop = CriticLoopWorkflow(workflow=workflow, critic=CriticAgent(llm))
+
+    profile: DraftingProfile | None = None
+    if profile_programme:
+        try:
+            profile = load_profile(Programme(profile_programme))
+        except ValueError as exc:
+            typer.echo(
+                f"error: --profile-programme must be one of "
+                f"{[p.value for p in Programme]}, got {profile_programme!r}",
+                err=True,
+            )
+            raise typer.Exit(code=1) from exc
+        except FileNotFoundError as exc:
+            typer.echo(
+                f"error: no drafting profile bundled for {profile_programme!r}: {exc}",
+                err=True,
+            )
+            raise typer.Exit(code=1) from exc
 
     # Resolve optional file-backed --context value. Failures here
     # surface as a clean BadParameter from the helper (Typer turns it
@@ -446,13 +499,51 @@ def section(
     )
 
     try:
-        draft = workflow.run(request)
+        draft = workflow.run(request, profile=profile)
     except LLMUnavailableError as exc:
         typer.echo(f"error: LLM unavailable: {exc}", err=True)
         raise typer.Exit(code=1) from exc
     except GenerationError as exc:
         typer.echo(f"error: generation failed: {exc}", err=True)
         raise typer.Exit(code=1) from exc
+
+    # Critic loop (Task 3.2 / issue #16). When --iterations > 1, run
+    # the loop synchronously up to the cap. Ctrl+C between iterations
+    # leaves ``draft`` pinned to the most recent completed pass so the
+    # downstream audit / write paths still have something to act on
+    # (AC #2: stop after any iteration).
+    if iterations > 1:
+        for next_pass in range(2, iterations + 1):
+            typer.echo(
+                f"  iteration {next_pass}/{iterations}: running critic loop..."
+            )
+            try:
+                result = critic_loop.iterate(
+                    prior_draft=draft,
+                    request=request,
+                    max_iterations=iterations,
+                    profile=profile,
+                )
+            except KeyboardInterrupt:
+                typer.echo(
+                    f"  ✗ interrupted before iteration {next_pass}; "
+                    f"keeping the draft from iteration {next_pass - 1}.",
+                    err=True,
+                )
+                break
+            except LLMUnavailableError as exc:
+                typer.echo(f"error: LLM unavailable during iteration: {exc}", err=True)
+                raise typer.Exit(code=1) from exc
+            except GenerationError as exc:
+                typer.echo(f"error: iteration failed: {exc}", err=True)
+                raise typer.Exit(code=1) from exc
+            draft = result.draft
+            if result.stopped:
+                typer.echo(
+                    f"  ✓ iteration cap reached (iteration {result.iteration_index} "
+                    f"of {result.max_iterations})."
+                )
+                break
 
     renderer = MarkdownCitationRenderer()
     rendered_md = renderer.render(draft)

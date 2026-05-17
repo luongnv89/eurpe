@@ -15,6 +15,7 @@ from eurpe.generation.models import (
     CitationRef,
     GenerationDraft,
     GenerationRequest,
+    IterationRecord,
 )
 from eurpe.schema import Programme, SectionType, SourceStatus
 
@@ -234,3 +235,106 @@ def test_generation_draft_request_is_echoed() -> None:
     d = _sample_draft()
     assert d.request.section_type is SectionType.METHODOLOGY
     assert d.request.user_intent == "x"
+
+
+# ---------------------------------------------------------------------------
+# IterationRecord (Task 3.2 / issue #16)
+# ---------------------------------------------------------------------------
+
+
+def _sample_iteration_record(**overrides: object) -> IterationRecord:
+    """Build an IterationRecord with sensible defaults overridden."""
+
+    base: dict[str, object] = dict(
+        iteration_index=2,
+        changes_summary="Expanded the methodology section. text +120 chars, citations +1.",
+        requirements_checked=["default-section-guidance", "validation strategy"],
+        critique_text="The methodology lacks a validation strategy — add one.",
+    )
+    base.update(overrides)
+    return IterationRecord(**base)  # type: ignore[arg-type]
+
+
+class TestIterationRecord:
+    def test_basic_construction(self) -> None:
+        rec = _sample_iteration_record()
+        assert rec.iteration_index == 2
+        assert "validation strategy" in rec.requirements_checked
+
+    def test_is_frozen(self) -> None:
+        rec = _sample_iteration_record()
+        with pytest.raises(ValidationError):
+            rec.iteration_index = 99  # type: ignore[misc]
+
+    def test_extra_field_forbidden(self) -> None:
+        with pytest.raises(ValidationError):
+            IterationRecord(  # type: ignore[call-arg]
+                iteration_index=2,
+                changes_summary="x",
+                requirements_checked=["r"],
+                critique_text="c",
+                extra="forbidden",
+            )
+
+    def test_iteration_index_must_be_at_least_two(self) -> None:
+        """The implicit first pass is 1; explicit records start at 2."""
+
+        with pytest.raises(ValidationError):
+            _sample_iteration_record(iteration_index=1)
+
+    def test_iteration_index_capped_at_five(self) -> None:
+        """AC #1 ceiling is five."""
+
+        with pytest.raises(ValidationError):
+            _sample_iteration_record(iteration_index=6)
+
+    def test_requirements_checked_must_be_non_empty(self) -> None:
+        """AC #3 requires the requirements list to be present and non-empty."""
+
+        with pytest.raises(ValidationError):
+            _sample_iteration_record(requirements_checked=[])
+
+    def test_changes_summary_must_be_non_empty(self) -> None:
+        """AC #3 requires the changes summary to be present and non-empty."""
+
+        with pytest.raises(ValidationError):
+            _sample_iteration_record(changes_summary="")
+
+    def test_critique_text_capped_at_4000_chars(self) -> None:
+        with pytest.raises(ValidationError):
+            _sample_iteration_record(critique_text="x" * 5000)
+
+
+class TestGenerationDraftIterations:
+    def test_iterations_defaults_to_empty_list(self) -> None:
+        """Backward compat: existing single-pass drafts have no iterations."""
+
+        d = _sample_draft()
+        assert d.iterations == []
+
+    def test_total_iterations_counts_implicit_first_pass(self) -> None:
+        d = _sample_draft()
+        assert d.total_iterations() == 1  # single pass
+
+        d_with = _sample_draft()
+        d_with = d_with.model_copy(
+            update={
+                "iterations": [
+                    _sample_iteration_record(iteration_index=2),
+                    _sample_iteration_record(iteration_index=3),
+                ]
+            }
+        )
+        assert d_with.total_iterations() == 3
+
+    def test_iterations_field_round_trips_through_json(self) -> None:
+        """Wire serialisation must preserve the iteration history."""
+
+        d = _sample_draft().model_copy(
+            update={
+                "iterations": [_sample_iteration_record(iteration_index=2)],
+            }
+        )
+        roundtrip = GenerationDraft.model_validate_json(d.model_dump_json())
+        assert len(roundtrip.iterations) == 1
+        assert roundtrip.iterations[0].iteration_index == 2
