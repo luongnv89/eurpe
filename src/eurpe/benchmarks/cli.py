@@ -94,12 +94,15 @@ def _select_backends(
     """Build embedder + LLM client for the requested runtime.
 
     Returns ``(embedder, llm, runtime_label)``. The label is the
-    *effective* runtime — if ``runtime`` is ``ollama`` but the daemon
-    is unreachable, :func:`make_embedder` /
-    :func:`make_llm_client` already fall back to the deterministic
-    stubs in offline mode; the label reflects the realised choice
-    rather than the requested one, so the report does not lie about
-    what produced the numbers.
+    *requested* runtime — when ``runtime=ollama`` the factories
+    :func:`make_embedder` / :func:`make_llm_client` may transparently
+    fall back to deterministic stubs in offline mode (e.g., Ollama
+    daemon unreachable). The label still reads ``ollama`` in that
+    case; the realised backend is visible in the report's ``embedder``
+    and ``llm_model`` fingerprint fields, which name the actual class
+    that produced the numbers. A reviewer comparing against PRD
+    targets should always cross-check ``embedder`` rather than trust
+    ``runtime`` alone.
 
     For the deterministic path the config is irrelevant — the stubs
     need no settings. For the ollama path we load the config so the
