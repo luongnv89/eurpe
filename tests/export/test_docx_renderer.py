@@ -154,8 +154,10 @@ def test_render_emits_body_text_with_inline_markers_preserved() -> None:
 
     renderer = DocxCitationRenderer()
     docx_bytes, _ = renderer.render(
-        _make_draft(text="Body talks about reference [1] and reference [2].",
-                    citations=[_make_citation(1), _make_citation(2)]),
+        _make_draft(
+            text="Body talks about reference [1] and reference [2].",
+            citations=[_make_citation(1), _make_citation(2)],
+        ),
     )
 
     paragraphs = _load_paragraphs(docx_bytes)
@@ -163,9 +165,7 @@ def test_render_emits_body_text_with_inline_markers_preserved() -> None:
     # The body paragraph survived (we expect at least one; the bullet
     # paragraphs in the Notes block also contain markers but the body
     # paragraph is the one with the prose).
-    assert any(
-        "Body talks about reference [1] and reference [2]." == p for p in body_paragraphs
-    )
+    assert any("Body talks about reference [1] and reference [2]." == p for p in body_paragraphs)
 
 
 def test_render_section_imipact_pathway_title_cases() -> None:
@@ -213,8 +213,10 @@ def test_render_preserves_each_source_status_label(status: SourceStatus) -> None
 
     renderer = DocxCitationRenderer()
     docx_bytes, _ = renderer.render(
-        _make_draft(citations=[_make_citation(1, source_status=status)],
-                    text="Body talks about reference [1]."),
+        _make_draft(
+            citations=[_make_citation(1, source_status=status)],
+            text="Body talks about reference [1].",
+        ),
     )
 
     rows = _load_table_rows(docx_bytes)
@@ -234,8 +236,10 @@ def test_render_notes_bullet_carries_status_badge(status: SourceStatus) -> None:
 
     renderer = DocxCitationRenderer()
     docx_bytes, _ = renderer.render(
-        _make_draft(citations=[_make_citation(1, source_status=status)],
-                    text="Body talks about reference [1]."),
+        _make_draft(
+            citations=[_make_citation(1, source_status=status)],
+            text="Body talks about reference [1].",
+        ),
     )
 
     paragraphs = _load_paragraphs(docx_bytes)
@@ -265,8 +269,10 @@ def test_render_emits_caveat_paragraph_for_non_funded_status(
 
     renderer = DocxCitationRenderer()
     docx_bytes, _ = renderer.render(
-        _make_draft(citations=[_make_citation(1, source_status=status)],
-                    text="Body talks about reference [1]."),
+        _make_draft(
+            citations=[_make_citation(1, source_status=status)],
+            text="Body talks about reference [1].",
+        ),
     )
 
     paragraphs = _load_paragraphs(docx_bytes)
@@ -374,8 +380,7 @@ def test_render_missing_page_falls_back_to_placeholder() -> None:
 
     renderer = DocxCitationRenderer()
     docx_bytes, _ = renderer.render(
-        _make_draft(citations=[_make_citation(1, page=None)],
-                    text="Body about [1]."),
+        _make_draft(citations=[_make_citation(1, page=None)], text="Body about [1]."),
     )
 
     rows = _load_table_rows(docx_bytes)

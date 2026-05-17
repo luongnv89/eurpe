@@ -103,9 +103,7 @@ def test_export_service_docx_happy_path() -> None:
     """
 
     service = ExportService()
-    result = service.export_section(
-        ExportRequest(draft=_make_draft(), format=ExportFormat.DOCX)
-    )
+    result = service.export_section(ExportRequest(draft=_make_draft(), format=ExportFormat.DOCX))
 
     assert result.format is ExportFormat.DOCX
     assert result.citation_count == 1
@@ -138,16 +136,12 @@ def test_export_service_docx_audit_failure_is_blocking() -> None:
 
     class _ShadowStripRenderer:
         def render(self, draft):  # noqa: ANN001 - test double, signature mirrors real renderer
-            shadow = (
-                f"# {draft.section_type.value}\n\n(rendered body omitted)\n\n## References\n\n"
-            )
+            shadow = f"# {draft.section_type.value}\n\n(rendered body omitted)\n\n## References\n\n"
             return b"\x50\x4b\x03\x04stub-docx-bytes", shadow
 
     service = ExportService(docx_renderer=_ShadowStripRenderer())
     with pytest.raises(ExportAuditError) as excinfo:
-        service.export_section(
-            ExportRequest(draft=_make_draft(), format=ExportFormat.DOCX)
-        )
+        service.export_section(ExportRequest(draft=_make_draft(), format=ExportFormat.DOCX))
     assert excinfo.value.finding_count >= 1
 
 
