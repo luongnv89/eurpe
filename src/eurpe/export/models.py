@@ -27,10 +27,10 @@ from eurpe.generation.models import GenerationDraft
 class ExportFormat(StrEnum):
     """Closed enum of output formats the export service supports.
 
-    DOCX is reserved for Task 3.3 and currently raises
-    :class:`~eurpe.export.errors.UnsupportedExportFormatError` so the
-    wire schema (and React UI) can already speak the value while the
-    renderer is wired up.
+    Both formats produce a render that preserves citations and the
+    ``SourceStatus`` labels end-to-end (PRD §22). Adding a new format
+    is a two-step change: add the enum member here, wire a renderer
+    into :class:`~eurpe.export.ExportService.export_section`.
     """
 
     MARKDOWN = "markdown"
@@ -68,27 +68,68 @@ class ExportRequest(BaseModel):
 class ExportResult(BaseModel):
     """Output of :meth:`ExportService.export_section`.
 
-    ``content`` is the rendered string for text formats. ``byte_count``
-    is computed from the UTF-8 encoding so analytics events (and HTTP
-    Content-Length headers, when this is exposed over the wire) don't
-    need to re-encode.
+    ``content`` is the textual rendering of the draft. For Markdown
+    exports it is the rendered Markdown source. For DOCX exports it
+    is the *shadow Markdown* mirror the DOCX renderer emits alongside
+    the binary payload — it is the same byte string the Markdown
+    branch produces, so the citation audit can apply the same
+    PRD §22 checks regardless of the chosen format.
+
+    ``content_bytes`` holds the binary payload for formats whose wire
+    form is not a UTF-8 string (DOCX today, PDF in a hypothetical
+    future). It is ``None`` for text-only formats. A caller writing
+    to disk picks the field that matches the format:
+
+    .. code-block:: python
+
+        if result.content_bytes is not None:
+            path.write_bytes(result.content_bytes)
+        else:
+            path.write_text(result.content, encoding="utf-8")
+
+    ``byte_count`` is the on-the-wire byte length: ``len(content_bytes)``
+    for binary formats, ``len(content.encode("utf-8"))`` for text
+    formats. Analytics events (and a future HTTP Content-Length
+    header) read this value directly — they should never need to
+    inspect the format enum to know which field to size.
 
     Source-status labels are preserved end-to-end: every citation
-    rendered into ``content`` carries its
-    :class:`~eurpe.schema.SourceStatus` via the existing
-    :class:`~eurpe.generation.render.MarkdownCitationRenderer` (which
-    enforces visible badges + caveats). ``citation_count`` is the
-    structural count exposed here so callers can assert AC #2 of issue
-    #14 without parsing the rendered text.
+    rendered into ``content`` (and the matching DOCX paragraph tree)
+    carries its :class:`~eurpe.schema.SourceStatus` via the existing
+    :class:`~eurpe.generation.render.MarkdownCitationRenderer` (and,
+    for DOCX, :class:`~eurpe.export.docx.DocxCitationRenderer`).
+    ``citation_count`` is the structural count exposed here so callers
+    can assert AC #2 of issue #14 without parsing the rendered text.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    content: str = Field(description="Rendered output as a string (UTF-8).")
+    content: str = Field(
+        description=(
+            "Textual rendering of the draft. For MARKDOWN this is the "
+            "rendered Markdown source. For DOCX this is the shadow "
+            "Markdown the DocxCitationRenderer emits alongside the "
+            "binary payload — same content the audit checks."
+        ),
+    )
+    content_bytes: bytes | None = Field(
+        default=None,
+        description=(
+            "Binary payload for formats whose wire form is not a UTF-8 "
+            "string (DOCX). ``None`` for text-only formats. A caller "
+            "writing to disk picks bytes when present and falls back to "
+            "``content.encode('utf-8')`` otherwise."
+        ),
+    )
     format: ExportFormat = Field(description="Echoes the format used for the render.")
     byte_count: int = Field(
         ge=0,
-        description="UTF-8 byte length of :attr:`content`.",
+        description=(
+            "On-the-wire byte length. ``len(content_bytes)`` for binary "
+            "formats, ``len(content.encode('utf-8'))`` for text formats. "
+            "Set by the service so analytics events do not need to "
+            "switch on :attr:`format`."
+        ),
     )
     citation_count: int = Field(
         ge=0,
