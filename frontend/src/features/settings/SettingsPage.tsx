@@ -90,7 +90,7 @@ export function SettingsPage() {
           ))}
         </ul>
 
-        <Card className="border-brand-amber/40 bg-brand-amber/8 shadow-editorial">
+        <Card className="border-brand-amber/40 bg-brand-amber/[0.08] shadow-editorial">
           <CardHeader>
             <CardTitle className="font-display text-brand-navy">
               About this build

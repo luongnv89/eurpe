@@ -181,8 +181,7 @@ function Tile({ to, Icon, step, title, blurb, cta }: Tile) {
     >
       <span
         aria-hidden="true"
-        className="absolute right-5 top-5 font-display text-4xl tabular-nums text-brand-navy/8 transition-colors group-hover:text-brand-amber/50"
-        style={{ color: "rgba(10,31,68,0.08)" }}
+        className="absolute right-5 top-5 font-display text-4xl tabular-nums text-brand-navy/[0.08] transition-colors group-hover:text-brand-amber/50"
       >
         {step}
       </span>
