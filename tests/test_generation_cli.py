@@ -1133,3 +1133,216 @@ def test_generate_section_cli_audit_runs_against_final_iteration(
     # ``Audit: passed`` shows up either way.
     combined = (result.output or "") + (result.stderr or "")
     assert "Audit" in combined
+
+
+# ---------------------------------------------------------------------------
+# Issue #18 / Task 3.4 — release audit harness CLI
+# ---------------------------------------------------------------------------
+
+
+def test_cli_audit_release_passes_on_clean_directory(tmp_path: Path) -> None:
+    """``eurpe generate audit-release <dir>`` → exit 0 when every draft passes.
+
+    Two hand-crafted clean drafts under ``tmp_path``; the harness
+    audits both, the verdict is PASS, and the CLI exits 0.
+    """
+
+    _write_clean_draft(tmp_path)
+    # Rename to disambiguate from any future test fixture.
+    (tmp_path / "clean-draft.json").rename(tmp_path / "draft-a.json")
+    _write_clean_draft(tmp_path)
+    (tmp_path / "clean-draft.json").rename(tmp_path / "draft-b.json")
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["generate", "audit-release", str(tmp_path)])
+
+    assert result.exit_code == 0, result.output
+    combined = (result.output or "") + (result.stderr or "")
+    assert "Release audit passed" in combined
+    # Summary counters are printed.
+    assert "audited drafts" in combined
+    assert "passed drafts" in combined
+
+
+def test_cli_audit_release_fails_on_dirty_directory(tmp_path: Path) -> None:
+    """A single dirty draft fails the batch — exit code 1."""
+
+    _write_clean_draft(tmp_path)
+    (tmp_path / "clean-draft.json").rename(tmp_path / "clean.json")
+    _write_dirty_draft(tmp_path)
+    (tmp_path / "dirty-draft.json").rename(tmp_path / "dirty.json")
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["generate", "audit-release", str(tmp_path)])
+
+    assert result.exit_code == 1, result.output
+    combined = (result.output or "") + (result.stderr or "")
+    assert "Release audit FAILED" in combined
+    # The Markdown summary's FAIL verdict appears on stdout.
+    assert "FAIL" in combined
+
+
+def test_cli_audit_release_writes_json_and_markdown(tmp_path: Path) -> None:
+    """``--output-json`` + ``--output-markdown`` produce both artefacts."""
+
+    _write_clean_draft(tmp_path)
+    out_json = tmp_path / "report" / "release.json"
+    out_md = tmp_path / "report" / "release.md"
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "generate",
+            "audit-release",
+            str(tmp_path),
+            "--output-json",
+            str(out_json),
+            "--output-markdown",
+            str(out_md),
+            "--no-summary",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert out_json.exists()
+    assert out_md.exists()
+
+    # JSON is a valid ReleaseAuditReport payload — verify by re-loading.
+    payload = json.loads(out_json.read_text(encoding="utf-8"))
+    assert payload["passed"] is True
+    assert payload["audited_drafts"] >= 1
+    assert "rows" in payload
+
+    # Markdown surface check — heading + verdict + tables.
+    md_text = out_md.read_text(encoding="utf-8")
+    assert "# Release Audit Report" in md_text
+    assert "**Verdict:** PASS" in md_text
+    assert "## Citation Fidelity" in md_text
+
+
+def test_cli_audit_release_sample_size_records_subset(tmp_path: Path) -> None:
+    """``--sample-size 2`` audits 2 drafts out of 5; report records subset."""
+
+    for i in range(5):
+        _write_clean_draft(tmp_path)
+        (tmp_path / "clean-draft.json").rename(tmp_path / f"draft-{i:02d}.json")
+
+    out_json = tmp_path / "release.json"
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "generate",
+            "audit-release",
+            str(tmp_path),
+            "--sample-size",
+            "2",
+            "--seed",
+            "42",
+            "--output-json",
+            str(out_json),
+            "--no-summary",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(out_json.read_text(encoding="utf-8"))
+    assert payload["sample_size"] == 2
+    assert payload["sample_seed"] == 42
+    assert payload["audited_drafts"] == 2
+    assert payload["total_drafts"] == 5
+    assert len(payload["sampled_paths"]) == 2
+
+
+def test_cli_audit_release_refuses_to_clobber(tmp_path: Path) -> None:
+    """An existing --output-json file is refused unless --overwrite is set."""
+
+    drafts_dir = tmp_path / "drafts"
+    drafts_dir.mkdir()
+    _write_clean_draft(drafts_dir)
+    out_dir = tmp_path / "reports"
+    out_dir.mkdir()
+    out_json = out_dir / "release.json"
+    out_json.write_text("existing", encoding="utf-8")
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "generate",
+            "audit-release",
+            str(drafts_dir),
+            "--output-json",
+            str(out_json),
+            "--no-summary",
+        ],
+    )
+
+    assert result.exit_code == 1, result.output
+    assert "already exists" in result.output
+    # The pre-existing content was not clobbered.
+    assert out_json.read_text(encoding="utf-8") == "existing"
+
+
+def test_cli_audit_release_overwrite_replaces_files(tmp_path: Path) -> None:
+    """``--overwrite`` lets the harness replace existing --output files."""
+
+    drafts_dir = tmp_path / "drafts"
+    drafts_dir.mkdir()
+    _write_clean_draft(drafts_dir)
+    out_dir = tmp_path / "reports"
+    out_dir.mkdir()
+    out_json = out_dir / "release.json"
+    out_json.write_text("old", encoding="utf-8")
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "generate",
+            "audit-release",
+            str(drafts_dir),
+            "--output-json",
+            str(out_json),
+            "--overwrite",
+            "--no-summary",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(out_json.read_text(encoding="utf-8"))
+    assert payload["passed"] is True
+
+
+def test_cli_audit_release_missing_directory_errors(tmp_path: Path) -> None:
+    """Non-existent directory surfaces Typer's exists=True check."""
+
+    missing = tmp_path / "does-not-exist"
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["generate", "audit-release", str(missing)])
+
+    assert result.exit_code != 0
+    # Typer prints "does not exist" via its built-in validator.
+    assert "does not exist" in result.output.lower() or "Invalid value" in result.output
+
+
+def test_cli_audit_release_empty_directory_exits_0_with_no_drafts(
+    tmp_path: Path,
+) -> None:
+    """Empty directory → exit 0 (vacuously true) with 0 audited."""
+
+    empty = tmp_path / "empty"
+    empty.mkdir()
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["generate", "audit-release", str(empty)])
+
+    assert result.exit_code == 0, result.output
+    combined = (result.output or "") + (result.stderr or "")
+    assert "audited drafts      : 0" in combined
+    # The Markdown summary prints _No drafts audited._ — verify the
+    # operator sees the empty result rather than a malformed table.
+    assert "No drafts audited" in combined

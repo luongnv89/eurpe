@@ -48,6 +48,11 @@ from eurpe.config import (
     load_config,
 )
 from eurpe.generation.audit import AuditResult, CitationAudit
+from eurpe.generation.audit_harness import (
+    ReleaseAuditHarness,
+    ReleaseAuditHarnessError,
+    ReleaseAuditReport,
+)
 from eurpe.generation.critic import CriticAgent
 from eurpe.generation.critic_loop import (
     MAX_ITERATIONS_CEILING,
@@ -514,9 +519,7 @@ def section(
     # (AC #2: stop after any iteration).
     if iterations > 1:
         for next_pass in range(2, iterations + 1):
-            typer.echo(
-                f"  iteration {next_pass}/{iterations}: running critic loop..."
-            )
+            typer.echo(f"  iteration {next_pass}/{iterations}: running critic loop...")
             try:
                 result = critic_loop.iterate(
                     prior_draft=draft,
@@ -655,3 +658,180 @@ def audit(
     _print_audit_findings(result)
 
     raise typer.Exit(code=0 if result.passed else 1)
+
+
+def _print_release_audit_summary(report: ReleaseAuditReport) -> None:
+    """Print a concise release-audit summary to stderr.
+
+    The full row-by-row report is written to disk via ``--output``;
+    stderr only carries the top-level verdict + counters so a CI log
+    is easy to skim. Mirrors the per-draft ``_print_audit_findings``
+    convention (status / counts on stderr; payload on stdout or disk).
+    """
+
+    verdict = "passed" if report.passed else "FAILED"
+    typer.echo("", err=True)
+    typer.echo(f"Release audit {verdict}:", err=True)
+    typer.echo(f"  audit_directory     : {report.audit_directory}", err=True)
+    typer.echo(f"  total drafts        : {report.total_drafts}", err=True)
+    typer.echo(f"  audited drafts      : {report.audited_drafts}", err=True)
+    typer.echo(f"  passed drafts       : {report.passed_drafts}", err=True)
+    typer.echo(f"  failed drafts       : {report.failed_drafts}", err=True)
+    typer.echo(f"  citations audited   : {report.citation_count}", err=True)
+    typer.echo(f"  unlabeled citations : {report.unlabeled_citation_count}", err=True)
+    if report.sample_size is not None:
+        typer.echo(f"  sample size         : {report.sample_size}", err=True)
+        typer.echo(f"  sample seed         : {report.sample_seed}", err=True)
+
+    # Per-draft failure list — only printed when at least one failed.
+    # An all-pass report keeps the stderr lean.
+    if report.failed_drafts:
+        typer.echo("", err=True)
+        typer.echo("Failed drafts:", err=True)
+        for r in report.draft_results:
+            if r.passed:
+                continue
+            codes = sorted({f.code for f in r.audit_result.errors})
+            typer.echo(
+                f"  - {r.draft_path}  [{', '.join(codes) or 'no-code'}]",
+                err=True,
+            )
+
+
+@generate_app.command("audit-release")
+def audit_release(
+    directory: Path = typer.Argument(
+        ...,
+        exists=True,
+        file_okay=False,
+        dir_okay=True,
+        readable=True,
+        help=(
+            "Directory containing one or more GenerationDraft JSON files "
+            "(typically the ``--output`` target of ``eurpe generate "
+            "section``). Subdirectories are walked recursively."
+        ),
+    ),
+    sample_size: int | None = typer.Option(
+        None,
+        "--sample-size",
+        "-n",
+        min=1,
+        help=(
+            "Audit a deterministic random sample of N drafts. When unset "
+            "(default), every discovered draft is audited. Combine with "
+            "``--seed`` for byte-equal subsets across re-runs."
+        ),
+    ),
+    seed: int | None = typer.Option(
+        None,
+        "--seed",
+        help=(
+            "Random seed for the sampling subset when ``--sample-size`` is "
+            "set. Defaults to 42 so a release manager who omits this flag "
+            "still gets reproducible output across machines. Recorded in "
+            "the report for traceability."
+        ),
+    ),
+    output_json: Path | None = typer.Option(
+        None,
+        "--output-json",
+        help=(
+            "Write the full ReleaseAuditReport as JSON to this path. "
+            "Atomic. Refuses to overwrite an existing file unless "
+            "``--overwrite`` is set."
+        ),
+    ),
+    output_markdown: Path | None = typer.Option(
+        None,
+        "--output-markdown",
+        help=(
+            "Write the Markdown release-audit summary to this path. "
+            "Atomic. Refuses to overwrite an existing file unless "
+            "``--overwrite`` is set. Operators paste this into release "
+            "notes."
+        ),
+    ),
+    overwrite: bool = typer.Option(
+        False,
+        "--overwrite",
+        "-f",
+        help="Overwrite existing --output-json / --output-markdown files.",
+    ),
+    print_summary: bool = typer.Option(
+        True,
+        "--summary/--no-summary",
+        help=(
+            "Print the Markdown summary to stdout in addition to writing "
+            "any --output-* files. Default on; set --no-summary for a "
+            "quiet CI run."
+        ),
+    ),
+) -> None:
+    """Audit every saved draft under DIRECTORY for citation fidelity.
+
+    The harness loads each ``*.json`` GenerationDraft, runs the same
+    :class:`~eurpe.generation.CitationAudit` checks the per-draft
+    ``audit`` subcommand applies, and aggregates the verdict.
+
+    Exits 0 when every audited draft passes. Exits 1 when any draft
+    fails OR the harness cannot load a draft file. The release-blocking
+    contract from PRD § "Source labeling accuracy" is enforced
+    end-to-end: every citation MUST visibly carry a status tag.
+
+    .. note::
+
+        Write ``--output-json`` / ``--output-markdown`` to a path
+        *outside* the audited directory. The harness walks ``DIRECTORY``
+        recursively for ``*.json`` files; an output file dropped inside
+        would be picked up as a draft on the next run and fail the
+        schema validation. Release workflows typically put outputs
+        under ``release-notes/audits/<release-tag>/`` instead.
+
+    Pairs with the manual audit template at
+    ``docs/release-audit-template.md`` for the human-judgement
+    portion of the release gate (e.g., "is this quoted passage
+    accurate against the cited PDF?"). Issue #18 AC3.
+    """
+
+    harness = ReleaseAuditHarness()
+    try:
+        report = harness.audit_directory(
+            directory,
+            sample_size=sample_size,
+            seed=seed,
+        )
+    except ReleaseAuditHarnessError as exc:
+        typer.echo(f"error: release audit failed: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    # Pre-flight the output paths BEFORE doing any work, so the user
+    # doesn't get a "file already exists" error after the audit has
+    # already run. Mirrors the section command's overwrite contract.
+    if not overwrite:
+        for label, path in (
+            ("--output-json", output_json),
+            ("--output-markdown", output_markdown),
+        ):
+            if path is not None and path.exists():
+                typer.echo(
+                    f"error: output file already exists: {path} "
+                    f"(pass --overwrite/-f to replace it or pick a different "
+                    f"{label} path)",
+                    err=True,
+                )
+                raise typer.Exit(code=1)
+
+    if output_json is not None:
+        _atomic_write(output_json, report.model_dump_json(indent=2) + "\n")
+        typer.echo(f"  wrote JSON     : {output_json}", err=True)
+    if output_markdown is not None:
+        _atomic_write(output_markdown, report.render_markdown_summary())
+        typer.echo(f"  wrote Markdown : {output_markdown}", err=True)
+
+    if print_summary:
+        typer.echo(report.render_markdown_summary())
+
+    _print_release_audit_summary(report)
+
+    raise typer.Exit(code=0 if report.passed else 1)
