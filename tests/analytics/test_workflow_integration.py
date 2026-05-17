@@ -195,9 +195,9 @@ def test_workflow_emits_two_events_with_no_content_leak(tmp_path: Path) -> None:
     # Sanity: the snippet sentinel actually flows through into at
     # least one citation. Otherwise the "snippet not in JSONL"
     # assertion below would be vacuously true.
-    assert any(_SENTINEL_SNIPPET_PREFIX in c.snippet for c in draft.citations), (
-        "test corpus must surface sentinel-bearing snippets so the leak assertion is meaningful"
-    )
+    assert any(
+        _SENTINEL_SNIPPET_PREFIX in c.snippet for c in draft.citations
+    ), "test corpus must surface sentinel-bearing snippets so the leak assertion is meaningful"
 
     raw = log_path.read_text(encoding="utf-8")
     lines = [line for line in raw.splitlines() if line.strip()]
@@ -214,15 +214,15 @@ def test_workflow_emits_two_events_with_no_content_leak(tmp_path: Path) -> None:
     # would be caught here.
     for sentinel_id in range(1, 4):
         marker = f"{_SENTINEL_SNIPPET_PREFIX}_{sentinel_id}"
-        assert marker not in raw, (
-            f"chunk snippet sentinel {marker!r} leaked into analytics log:\n{raw!r}"
-        )
+        assert (
+            marker not in raw
+        ), f"chunk snippet sentinel {marker!r} leaked into analytics log:\n{raw!r}"
     # Defensive: the literal prefix should also be absent even without
     # a sentinel id (catches any partial leak where only the prefix
     # made it through a truncation).
-    assert _SENTINEL_SNIPPET_PREFIX not in raw, (
-        f"snippet sentinel prefix leaked into analytics log:\n{raw!r}"
-    )
+    assert (
+        _SENTINEL_SNIPPET_PREFIX not in raw
+    ), f"snippet sentinel prefix leaked into analytics log:\n{raw!r}"
 
     # Event-shape assertions: one start, one complete, no extras.
     parsed = [json.loads(line) for line in lines]

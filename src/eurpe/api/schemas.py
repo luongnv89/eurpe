@@ -544,14 +544,11 @@ class FetchCallResponse(BaseModel):
     topic_title: str = Field(description="Human-readable topic title.")
     expected_outcomes: str = Field(
         description=(
-            "Bullet list of expected outcomes. Always empty in v1 — see "
-            "the schema docstring."
+            "Bullet list of expected outcomes. Always empty in v1 — see " "the schema docstring."
         ),
     )
     scope: str = Field(
-        description=(
-            "Free-text scope. Always empty in v1 — see the schema docstring."
-        ),
+        description=("Free-text scope. Always empty in v1 — see the schema docstring."),
     )
     call_title: str = Field(
         description=(

@@ -100,6 +100,6 @@ def test_smoke_audit_log_does_not_leak_payload(tmp_path: Path) -> None:
     audit_log = tmp_path / "runtime" / "network-audit.log"
     content = audit_log.read_text(encoding="utf-8")
     for forbidden in ("body", "headers", "query", "prompt", "completion"):
-        assert forbidden not in content.lower(), (
-            f"audit log must not contain {forbidden!r}; saw {content!r}"
-        )
+        assert (
+            forbidden not in content.lower()
+        ), f"audit log must not contain {forbidden!r}; saw {content!r}"

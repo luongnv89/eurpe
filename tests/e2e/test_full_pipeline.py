@@ -108,14 +108,14 @@ def test_full_pipeline(pdf_path: Path, tmp_path: Path) -> None:
     )
 
     # AC4 — parsed chunks > 0.
-    assert artefacts["chunk_count"] > 0, (
-        f"index build reported 0 chunks for {pdf_path}:\n{artefacts['build_output']}"
-    )
+    assert (
+        artefacts["chunk_count"] > 0
+    ), f"index build reported 0 chunks for {pdf_path}:\n{artefacts['build_output']}"
 
     # AC4 — index populated.
-    assert artefacts["collection_count"] > 0, (
-        f"collection count was 0 after build for {pdf_path}:\n{artefacts['build_output']}"
-    )
+    assert (
+        artefacts["collection_count"] > 0
+    ), f"collection count was 0 after build for {pdf_path}:\n{artefacts['build_output']}"
 
     # AC4 — retrieval returned results. The proof that retrieval ran is
     # the query CLI's exit code 0 (run_full_pipeline raises on non-zero).
@@ -125,9 +125,9 @@ def test_full_pipeline(pdf_path: Path, tmp_path: Path) -> None:
     # retriever. A future improvement could parametrise the probe per
     # fixture so the hit-count assertion can tighten to ``>= 1``.
     assert artefacts["query_output"], "query CLI produced no output"
-    assert "(no results)" in artefacts["query_output"] or artefacts["query_hits"] >= 1, (
-        f"query output unexpected:\n{artefacts['query_output']}"
-    )
+    assert (
+        "(no results)" in artefacts["query_output"] or artefacts["query_hits"] >= 1
+    ), f"query output unexpected:\n{artefacts['query_output']}"
 
     # AC4 — at least one section generated. The generate CLI wrote both
     # forms because run_full_pipeline uses ``--render both``.
@@ -139,9 +139,9 @@ def test_full_pipeline(pdf_path: Path, tmp_path: Path) -> None:
 
     assert json_path.exists(), f"missing rendered JSON: {json_path}"
     payload = json.loads(json_path.read_text(encoding="utf-8"))
-    assert payload["section_type"] == "methodology", (
-        f"unexpected section_type in {json_path}: {payload.get('section_type')!r}"
-    )
+    assert (
+        payload["section_type"] == "methodology"
+    ), f"unexpected section_type in {json_path}: {payload.get('section_type')!r}"
 
     # Issue #48 — when EURPE_E2E_REQUIRE_LLM=1, fail loudly if the
     # offline stub produced the draft (the GenerationDraft already
@@ -169,9 +169,9 @@ def test_full_pipeline(pdf_path: Path, tmp_path: Path) -> None:
     audit_summary = artefacts["audit_summary"]
     has_citation_row = "| 1 |" in md_text
     if audit_exit == 0:
-        assert "passed (no findings)" in audit_summary or "passed with" in audit_summary, (
-            f"audit reported exit 0 but the summary doesn't mark it passed:\n{audit_summary}"
-        )
+        assert (
+            "passed (no findings)" in audit_summary or "passed with" in audit_summary
+        ), f"audit reported exit 0 but the summary doesn't mark it passed:\n{audit_summary}"
         assert has_citation_row, (
             "audit passed but the rendered Markdown has no citation row — "
             "issue #45 AC3 requires at least one ``| 1 |`` row when audit passes:\n"
@@ -187,9 +187,9 @@ def test_full_pipeline(pdf_path: Path, tmp_path: Path) -> None:
         # ``no_evidence_escape`` and ``placeholder_text``; the older
         # gates (``missing_status``, ``bad_render``, ...) are valid
         # too. Just require the format ``ERROR (<code>):``.
-        assert "ERROR (" in audit_summary, (
-            f"audit failure did not name an ERROR code:\n{audit_summary}"
-        )
+        assert (
+            "ERROR (" in audit_summary
+        ), f"audit failure did not name an ERROR code:\n{audit_summary}"
 
     # AC5 — deterministic location: the pipeline log is in the run dir.
     assert (run_dir / "pipeline.log").exists()

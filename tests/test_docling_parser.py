@@ -222,9 +222,9 @@ def test_parse_real_pdf_returns_parsed_proposal(tmp_path: Path) -> None:
     assert len(parsed.sections) >= 1
     # The "1. Introduction" heading must be recoverable verbatim.
     headings = [s.heading for s in parsed.sections]
-    assert any("Introduction" in h for h in headings), (
-        f"expected an 'Introduction' heading; got {headings}"
-    )
+    assert any(
+        "Introduction" in h for h in headings
+    ), f"expected an 'Introduction' heading; got {headings}"
     # Page count is at least 1 for our one-page synthetic doc.
     assert parsed.page_count is not None and parsed.page_count >= 1
     # Total text length must be non-zero or we extracted nothing.

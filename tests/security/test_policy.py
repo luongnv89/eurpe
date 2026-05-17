@@ -239,9 +239,9 @@ def test_audit_log_never_contains_forbidden_fields(audit_log: Path) -> None:
         gate.check("example.com", 443, "https", "/api", "src2")
     text = audit_log.read_text(encoding="utf-8")
     for forbidden in ("body", "headers", "query", "prompt", "completion", "passage"):
-        assert forbidden not in text.lower(), (
-            f"audit log must not contain {forbidden!r}; saw {text!r}"
-        )
+        assert (
+            forbidden not in text.lower()
+        ), f"audit log must not contain {forbidden!r}; saw {text!r}"
 
 
 def test_audit_log_is_appended_not_truncated(audit_log: Path) -> None:

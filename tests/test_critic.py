@@ -226,9 +226,7 @@ class TestCriticAgent:
         assert text.strip(), "deterministic critic returned empty text"
         assert reqs == [_DEFAULT_REQUIREMENT_SENTINEL]
 
-    def test_critique_truncates_long_output_at_cap(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_critique_truncates_long_output_at_cap(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Critique longer than 4000 chars is truncated at the cap (not rejected)."""
 
         class _LongLLM:

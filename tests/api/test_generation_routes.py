@@ -128,8 +128,7 @@ class _StubService:
             record = IterationRecord(
                 iteration_index=new_index,
                 changes_summary=(
-                    f"Iteration {new_index} expanded the draft. "
-                    "text +50 chars, citations +0."
+                    f"Iteration {new_index} expanded the draft. " "text +50 chars, citations +0."
                 ),
                 requirements_checked=[
                     "default-section-guidance",
@@ -458,9 +457,7 @@ class TestIterateSectionRoute:
         _override_with(configured_app, "happy")
         payload = _iterate_payload()
         payload["max_iterations"] = invalid
-        response = configured_app.post(
-            "/api/generation/section/iterate", json=payload
-        )
+        response = configured_app.post("/api/generation/section/iterate", json=payload)
         assert response.status_code == 422, response.text
 
     def test_extra_field_forbidden(self, configured_app: TestClient) -> None:
@@ -469,9 +466,7 @@ class TestIterateSectionRoute:
         _override_with(configured_app, "happy")
         payload = _iterate_payload()
         payload["typo_field"] = "oops"
-        response = configured_app.post(
-            "/api/generation/section/iterate", json=payload
-        )
+        response = configured_app.post("/api/generation/section/iterate", json=payload)
         assert response.status_code == 422, response.text
 
     def test_missing_prior_draft_returns_422(self, configured_app: TestClient) -> None:
@@ -480,23 +475,17 @@ class TestIterateSectionRoute:
         _override_with(configured_app, "happy")
         payload = _iterate_payload()
         del payload["prior_draft"]
-        response = configured_app.post(
-            "/api/generation/section/iterate", json=payload
-        )
+        response = configured_app.post("/api/generation/section/iterate", json=payload)
         assert response.status_code == 422, response.text
 
     def test_llm_unavailable_maps_to_503(self, configured_app: TestClient) -> None:
         _override_with(configured_app, "llm_unavailable")
-        response = configured_app.post(
-            "/api/generation/section/iterate", json=_iterate_payload()
-        )
+        response = configured_app.post("/api/generation/section/iterate", json=_iterate_payload())
         assert response.status_code == 503, response.text
 
     def test_generation_error_maps_to_500(self, configured_app: TestClient) -> None:
         _override_with(configured_app, "generation_error")
-        response = configured_app.post(
-            "/api/generation/section/iterate", json=_iterate_payload()
-        )
+        response = configured_app.post("/api/generation/section/iterate", json=_iterate_payload())
         assert response.status_code == 500, response.text
         assert "iteration failed" in response.text
 
@@ -504,9 +493,7 @@ class TestIterateSectionRoute:
         _override_with(configured_app, "missing_profile")
         payload = _iterate_payload()
         payload["profile_programme"] = Programme.HORIZON_EUROPE.value
-        response = configured_app.post(
-            "/api/generation/section/iterate", json=payload
-        )
+        response = configured_app.post("/api/generation/section/iterate", json=payload)
         assert response.status_code == 400, response.text
 
 
@@ -549,12 +536,8 @@ class TestFetchCallRoute:
                 source_url=url,
             )
 
-        monkeypatch.setattr(
-            "eurpe.api.routes.generate.fetch_call_context", _fake_fetch
-        )
-        response = configured_app.post(
-            "/api/generation/fetch-call", json={"url": self._PORTAL_URL}
-        )
+        monkeypatch.setattr("eurpe.api.routes.generate.fetch_call_context", _fake_fetch)
+        response = configured_app.post("/api/generation/fetch-call", json={"url": self._PORTAL_URL})
         assert response.status_code == 200, response.text
         body = response.json()
         assert body["call_id"] == "HORIZON-CL3-2026-02-CS-ECCC"
@@ -574,9 +557,7 @@ class TestFetchCallRoute:
         def _raises(url: str, **_kw: object) -> None:
             raise InvalidPortalURLError("not a portal URL")
 
-        monkeypatch.setattr(
-            "eurpe.api.routes.generate.fetch_call_context", _raises
-        )
+        monkeypatch.setattr("eurpe.api.routes.generate.fetch_call_context", _raises)
         response = configured_app.post(
             "/api/generation/fetch-call", json={"url": "https://example.com/"}
         )
@@ -593,12 +574,8 @@ class TestFetchCallRoute:
         def _raises(url: str, **_kw: object) -> None:
             raise TopicNotFoundError("no SEDIA result")
 
-        monkeypatch.setattr(
-            "eurpe.api.routes.generate.fetch_call_context", _raises
-        )
-        response = configured_app.post(
-            "/api/generation/fetch-call", json={"url": self._PORTAL_URL}
-        )
+        monkeypatch.setattr("eurpe.api.routes.generate.fetch_call_context", _raises)
+        response = configured_app.post("/api/generation/fetch-call", json={"url": self._PORTAL_URL})
         assert response.status_code == 404, response.text
 
     def test_portal_unavailable_maps_to_502(
@@ -611,20 +588,12 @@ class TestFetchCallRoute:
         def _raises(url: str, **_kw: object) -> None:
             raise PortalUnavailableError("dns failure")
 
-        monkeypatch.setattr(
-            "eurpe.api.routes.generate.fetch_call_context", _raises
-        )
-        response = configured_app.post(
-            "/api/generation/fetch-call", json={"url": self._PORTAL_URL}
-        )
+        monkeypatch.setattr("eurpe.api.routes.generate.fetch_call_context", _raises)
+        response = configured_app.post("/api/generation/fetch-call", json={"url": self._PORTAL_URL})
         assert response.status_code == 502, response.text
 
-    def test_empty_url_rejected_at_pydantic_layer(
-        self, configured_app: TestClient
-    ) -> None:
+    def test_empty_url_rejected_at_pydantic_layer(self, configured_app: TestClient) -> None:
         """An empty ``url`` field fails Pydantic's ``min_length`` and never reaches the fetcher."""
 
-        response = configured_app.post(
-            "/api/generation/fetch-call", json={"url": ""}
-        )
+        response = configured_app.post("/api/generation/fetch-call", json={"url": ""})
         assert response.status_code == 422, response.text

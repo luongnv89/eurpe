@@ -116,6 +116,6 @@ def test_analytics_package_does_not_import_generation_or_retrieval() -> None:
         or m.startswith("eurpe.retrieval.")
         or m in {"eurpe.generation.workflow", "eurpe.generation.llm"}
     }
-    assert leaf_violations == set(), (
-        f"eurpe.analytics must be a leaf module but transitively imports: {sorted(leaf_violations)}"
-    )
+    assert (
+        leaf_violations == set()
+    ), f"eurpe.analytics must be a leaf module but transitively imports: {sorted(leaf_violations)}"

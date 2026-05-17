@@ -51,6 +51,7 @@ repos:
     hooks:
       - id: bandit
         args: ["-q", "-r", "src/", "--skip", "B101"]
+        pass_filenames: false
         stages: [pre-commit]
 
   # Secret scanning (offline).

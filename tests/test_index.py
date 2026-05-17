@@ -124,9 +124,9 @@ def test_metadata_round_trip_preserves_every_field() -> None:
         "source_path",
         "language",
     ):
-        assert getattr(reloaded.proposal, field) == getattr(original.proposal, field), (
-            f"field {field} drifted"
-        )
+        assert getattr(reloaded.proposal, field) == getattr(
+            original.proposal, field
+        ), f"field {field} drifted"
 
 
 def test_metadata_round_trip_preserves_none_values() -> None:

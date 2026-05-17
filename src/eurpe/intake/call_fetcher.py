@@ -63,9 +63,7 @@ SEDIA_SEARCH_URL = "https://api.tech.ec.europa.eu/search-api/prod/rest/search"
 # portal (which currently still serves the topic SPA) and the new
 # ``commission.europa.eu`` domain users are starting to be redirected to.
 # Anything else is rejected with a 422-style error.
-_ACCEPTED_HOSTS: frozenset[str] = frozenset(
-    {"ec.europa.eu", "commission.europa.eu"}
-)
+_ACCEPTED_HOSTS: frozenset[str] = frozenset({"ec.europa.eu", "commission.europa.eu"})
 
 # Canonical topic-id shape: the portal uses uppercase identifiers like
 # ``HORIZON-CL3-2026-02-CS-ECCC-02``. We accept any alphanumeric +
@@ -157,16 +155,12 @@ def extract_topic_id(url: str) -> str:
         raise InvalidPortalURLError(f"could not parse URL: {exc}") from exc
 
     if parsed.scheme not in {"http", "https"}:
-        raise InvalidPortalURLError(
-            "URL must use http or https; "
-            f"got scheme {parsed.scheme!r}"
-        )
+        raise InvalidPortalURLError("URL must use http or https; " f"got scheme {parsed.scheme!r}")
     if not parsed.hostname:
         raise InvalidPortalURLError("URL is missing a host")
     if parsed.hostname not in _ACCEPTED_HOSTS:
         raise InvalidPortalURLError(
-            "URL must point to ec.europa.eu or commission.europa.eu; "
-            f"got {parsed.hostname!r}"
+            "URL must point to ec.europa.eu or commission.europa.eu; " f"got {parsed.hostname!r}"
         )
 
     # Match against the path only — query strings and fragments often
@@ -175,9 +169,7 @@ def extract_topic_id(url: str) -> str:
     # canonical place.
     marker = "/topic-details/"
     if marker not in parsed.path:
-        raise InvalidPortalURLError(
-            "URL path does not contain '/topic-details/<topic_id>'"
-        )
+        raise InvalidPortalURLError("URL path does not contain '/topic-details/<topic_id>'")
     tail = parsed.path.split(marker, 1)[1]
     # Strip any trailing slash, matrix-param suffix, or .json extension
     # (the SPA URLs sometimes carry the latter as a logical id).
@@ -275,41 +267,29 @@ def fetch_call_context(
         try:
             response = client.post(SEDIA_SEARCH_URL, params=params, json=body)
         except httpx.TimeoutException as exc:
-            raise PortalUnavailableError(
-                f"SEDIA request timed out after {timeout:.1f}s"
-            ) from exc
+            raise PortalUnavailableError(f"SEDIA request timed out after {timeout:.1f}s") from exc
         except httpx.HTTPError as exc:
-            raise PortalUnavailableError(
-                f"SEDIA request failed: {exc}"
-            ) from exc
+            raise PortalUnavailableError(f"SEDIA request failed: {exc}") from exc
 
         if response.status_code >= 500:
-            raise PortalUnavailableError(
-                f"SEDIA returned HTTP {response.status_code}"
-            )
+            raise PortalUnavailableError(f"SEDIA returned HTTP {response.status_code}")
         if response.status_code != 200:
             # 4xx from SEDIA is usually a bad apiKey or a mangled query —
             # neither of which the operator can fix, so we treat it as
             # an upstream problem rather than reflecting the code back.
-            raise PortalUnavailableError(
-                f"SEDIA returned HTTP {response.status_code}"
-            )
+            raise PortalUnavailableError(f"SEDIA returned HTTP {response.status_code}")
 
         try:
             payload = response.json()
         except ValueError as exc:
-            raise PortalUnavailableError(
-                f"SEDIA returned non-JSON payload: {exc}"
-            ) from exc
+            raise PortalUnavailableError(f"SEDIA returned non-JSON payload: {exc}") from exc
     finally:
         if owns_client:
             client.close()
 
     result = _pick_topic_result(payload, topic_id)
     if result is None:
-        raise TopicNotFoundError(
-            f"no SEDIA result for topic identifier {topic_id!r}"
-        )
+        raise TopicNotFoundError(f"no SEDIA result for topic identifier {topic_id!r}")
 
     metadata = result.get("metadata") or {}
     call_id = _extract_single(metadata.get("callIdentifier"))
@@ -325,9 +305,7 @@ def fetch_call_context(
             topic_id,
             sorted(metadata.keys()),
         )
-        raise PortalUnavailableError(
-            f"SEDIA result for {topic_id} is missing call_id or title"
-        )
+        raise PortalUnavailableError(f"SEDIA result for {topic_id} is missing call_id or title")
 
     return CallFetchResult(
         call_id=call_id,

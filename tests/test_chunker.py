@@ -163,9 +163,9 @@ def test_chunker_respects_target_chars() -> None:
     assert len(chunks) > 1
     tolerance = 200  # the splitter searches a +/- 100 window for boundaries
     for chunk in chunks[:-1]:
-        assert len(chunk.text) <= 1200 + tolerance, (
-            f"chunk {chunk.metadata.chunk_index} too long: {len(chunk.text)} chars"
-        )
+        assert (
+            len(chunk.text) <= 1200 + tolerance
+        ), f"chunk {chunk.metadata.chunk_index} too long: {len(chunk.text)} chars"
     # Final chunk may be shorter than ``target_chars`` — that is fine
     # by design.
     assert len(chunks[-1].text) <= 1200 + tolerance

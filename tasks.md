@@ -1,6 +1,6 @@
 # Development Tasks - EURPE
 
-> Generated from: [prd.md](./prd.md)  
+> Generated from: [prd.md](./prd.md)
 > Generated on: 2026-05-14
 
 ## Overview

@@ -307,9 +307,9 @@ def test_run_with_lessons_learned_propagates_to_retriever(tmp_path) -> None:  # 
     statuses = [c.source_status for c in draft.citations]
     # The corpus has 2 rejected chunks; under lessons_learned mode at
     # least one should appear in the citations.
-    assert SourceStatus.REJECTED in statuses, (
-        f"Expected at least one rejected citation under lessons_learned=True; got {statuses}"
-    )
+    assert (
+        SourceStatus.REJECTED in statuses
+    ), f"Expected at least one rejected citation under lessons_learned=True; got {statuses}"
 
 
 # ---------------------------------------------------------------------------

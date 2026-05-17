@@ -244,9 +244,9 @@ def test_render_notes_bullet_carries_status_badge(status: SourceStatus) -> None:
 
     paragraphs = _load_paragraphs(docx_bytes)
     badge = STATUS_BADGE[status]
-    assert any(badge in p for p in paragraphs), (
-        f"Expected status badge {badge!r} in DOCX paragraphs, got: {paragraphs}"
-    )
+    assert any(
+        badge in p for p in paragraphs
+    ), f"Expected status badge {badge!r} in DOCX paragraphs, got: {paragraphs}"
 
 
 @pytest.mark.parametrize(
