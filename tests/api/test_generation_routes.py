@@ -29,7 +29,6 @@ from eurpe.api.main import app
 from eurpe.generation import (
     GenerationDraft,
     GenerationError,
-    GenerationService,
     LLMUnavailableError,
     SectionGenerationRequest,
 )

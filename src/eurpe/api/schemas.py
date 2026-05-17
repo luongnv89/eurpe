@@ -251,8 +251,7 @@ class GenerateSectionRequest(BaseModel):
     target_programme: Programme | None = Field(
         default=None,
         description=(
-            "Optional programme filter for retrieval. ``None`` retrieves "
-            "across all programmes."
+            "Optional programme filter for retrieval. ``None`` retrieves across all programmes."
         ),
     )
     profile_programme: Programme | None = Field(
