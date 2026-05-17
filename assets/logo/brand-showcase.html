@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EURPE — Brand Identity</title>
+<style>
+  :root {
+    --navy: #0A1F44;
+    --gold: #FFD617;
+    --paper: #FAFAFA;
+    --ink: #111827;
+    --muted: #6B7280;
+    --line: #E5E7EB;
+    --dark: #0A0A0A;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    font-family: Inter, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    color: var(--ink);
+    background: var(--paper);
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 64px 32px; }
+  h1, h2, h3 { color: var(--navy); margin: 0 0 12px; letter-spacing: -0.01em; }
+  h1 { font-size: 48px; font-weight: 800; letter-spacing: -0.02em; }
+  h2 { font-size: 28px; font-weight: 700; margin-top: 64px; }
+  h3 { font-size: 16px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+  p { margin: 0 0 16px; color: #374151; }
+  code { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 13px;
+         background: #F3F4F6; padding: 2px 6px; border-radius: 4px; }
+  hr { border: 0; border-top: 1px solid var(--line); margin: 48px 0; }
+
+  /* Hero */
+  .hero {
+    background: var(--navy);
+    color: var(--paper);
+    padding: 96px 32px;
+    text-align: center;
+  }
+  .hero img { width: 96px; height: 96px; }
+  .hero h1 { color: var(--paper); margin-top: 24px; }
+  .hero p { color: #CBD5E1; max-width: 600px; margin: 8px auto 0; }
+  .hero .gold-accent { color: var(--gold); }
+
+  /* Variant grid */
+  .grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
+  .tile {
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    overflow: hidden;
+    background: #fff;
+    display: flex; flex-direction: column;
+  }
+  .tile .preview {
+    height: 160px;
+    display: flex; align-items: center; justify-content: center;
+    padding: 24px;
+  }
+  .tile .preview.dark { background: var(--dark); }
+  .tile .preview.light { background: var(--paper); }
+  .tile .preview.navy { background: var(--navy); }
+  .tile img { max-width: 100%; max-height: 100%; display: block; }
+  .tile .meta {
+    padding: 12px 16px;
+    border-top: 1px solid var(--line);
+    font-size: 13px;
+    color: var(--muted);
+  }
+  .tile .meta strong { color: var(--ink); display: block; margin-bottom: 2px; }
+
+  /* Palette */
+  .palette { display: grid; gap: 16px; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
+  .swatch {
+    border: 1px solid var(--line); border-radius: 12px; overflow: hidden;
+  }
+  .swatch .chip { height: 120px; }
+  .swatch .label { padding: 12px 16px; font-size: 13px; }
+  .swatch .label strong { display: block; color: var(--ink); margin-bottom: 4px; }
+  .swatch .hex { font-family: ui-monospace, monospace; color: var(--muted); }
+
+  /* Typography sample */
+  .type-sample {
+    border: 1px solid var(--line); border-radius: 12px; padding: 32px;
+    background: #fff;
+  }
+  .type-sample .word {
+    font-weight: 700; font-size: 64px; letter-spacing: 2px;
+    color: var(--navy); line-height: 1;
+  }
+  .type-sample .meta { color: var(--muted); margin-top: 12px; font-size: 14px; }
+
+  /* Dev reference */
+  pre {
+    background: #0F172A; color: #E2E8F0; padding: 20px 24px; border-radius: 12px;
+    overflow-x: auto; font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 13px; line-height: 1.6;
+  }
+
+  /* Footer */
+  footer { color: var(--muted); font-size: 13px; padding: 32px; text-align: center; border-top: 1px solid var(--line); }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <img src="logo-white.svg" alt="EURPE logo" style="width:auto;height:80px;">
+  <h1>EURPE <span class="gold-accent">·</span> Brand Identity</h1>
+  <p>EU Research Project Proposal Expert — a fully-local, privacy-respecting AI assistant for drafting Horizon Europe and related research proposals.</p>
+</header>
+
+<div class="wrap">
+
+  <h2>Design concept</h2>
+  <p>The mark stacks three horizontal bars to suggest both the letter <strong>E</strong> and the layered structure of a proposal — sections, deliverables, work packages, evidence. The single gold dot at the mid-bar's edge is the EU-funding accent: a visual nod to the ring of stars, and a "highlight" that signals the indexed cursor / the spot where the proposal coordinator is working. Geometry is deliberately reduced so the mark stays legible from 16×16 favicon to hero banner.</p>
+
+  <h2>Logo variants</h2>
+  <div class="grid">
+    <div class="tile">
+      <div class="preview light"><img src="logo-mark.svg" alt="logo-mark.svg" style="width:96px;height:96px;"></div>
+      <div class="meta"><strong>logo-mark.svg</strong>64×64 · canonical mark</div>
+    </div>
+    <div class="tile">
+      <div class="preview light"><img src="logo-full.svg" alt="logo-full.svg" style="width:260px;"></div>
+      <div class="meta"><strong>logo-full.svg</strong>320×72 · mark + wordmark</div>
+    </div>
+    <div class="tile">
+      <div class="preview light"><img src="logo-wordmark.svg" alt="logo-wordmark.svg" style="width:180px;"></div>
+      <div class="meta"><strong>logo-wordmark.svg</strong>180×40 · text only</div>
+    </div>
+    <div class="tile">
+      <div class="preview navy"><img src="logo-icon.svg" alt="logo-icon.svg" style="width:128px;height:128px;border-radius:24px;"></div>
+      <div class="meta"><strong>logo-icon.svg</strong>512×512 · app icon</div>
+    </div>
+    <div class="tile">
+      <div class="preview light"><img src="favicon.svg" alt="favicon.svg" style="width:64px;height:64px;"></div>
+      <div class="meta"><strong>favicon.svg</strong>16×16 · simplified 2-layer mark</div>
+    </div>
+    <div class="tile">
+      <div class="preview dark"><img src="logo-white.svg" alt="logo-white.svg" style="width:260px;"></div>
+      <div class="meta"><strong>logo-white.svg</strong>For dark backgrounds</div>
+    </div>
+    <div class="tile">
+      <div class="preview light"><img src="logo-black.svg" alt="logo-black.svg" style="width:260px;"></div>
+      <div class="meta"><strong>logo-black.svg</strong>For light / print backgrounds</div>
+    </div>
+  </div>
+
+  <h2>Color palette</h2>
+  <div class="palette">
+    <div class="swatch">
+      <div class="chip" style="background:#0A1F44;"></div>
+      <div class="label"><strong>EU Navy</strong><span class="hex">#0A1F44</span><br>Primary — bars, wordmark</div>
+    </div>
+    <div class="swatch">
+      <div class="chip" style="background:#FFD617;"></div>
+      <div class="label"><strong>EU Gold</strong><span class="hex">#FFD617</span><br>Accent — single dot only</div>
+    </div>
+    <div class="swatch">
+      <div class="chip" style="background:#FAFAFA;border-bottom:1px solid var(--line);"></div>
+      <div class="label"><strong>Paper</strong><span class="hex">#FAFAFA</span><br>Background</div>
+    </div>
+    <div class="swatch">
+      <div class="chip" style="background:#111827;"></div>
+      <div class="label"><strong>Ink</strong><span class="hex">#111827</span><br>Body text</div>
+    </div>
+    <div class="swatch">
+      <div class="chip" style="background:#6B7280;"></div>
+      <div class="label"><strong>Muted</strong><span class="hex">#6B7280</span><br>Secondary text</div>
+    </div>
+  </div>
+
+  <h2>Typography</h2>
+  <div class="type-sample">
+    <div class="word">EURPE</div>
+    <div class="meta">Inter Bold · 32–64px · letter-spacing 2 · all-caps for the wordmark.<br>Body and UI: Inter Regular / Medium. System monospace for code and CLI references.</div>
+  </div>
+
+  <h2>Developer reference</h2>
+  <p>Tailwind palette additions for the React frontend (<code>frontend/tailwind.config.ts</code>):</p>
+  <pre>extend: {
+  colors: {
+    brand: {
+      navy:  "#0A1F44",   // primary
+      gold:  "#FFD617",   // accent (sparingly)
+      paper: "#FAFAFA",
+      ink:   "#111827",
+      muted: "#6B7280",
+    },
+  },
+}</pre>
+
+  <p>HTML embed for the favicon:</p>
+  <pre>&lt;link rel="icon" type="image/svg+xml" href="/assets/logo/favicon.svg"&gt;</pre>
+
+  <h2>Usage rules</h2>
+  <ul>
+    <li>Gold is an <strong>accent only</strong> — never a fill or background. One dot per mark.</li>
+    <li>Never recolor the bars to gold or invert the navy/gold relationship.</li>
+    <li>Maintain at least 8px of clear space around the mark at any size.</li>
+    <li>Use <code>logo-white.svg</code> on backgrounds darker than #444; <code>logo-black.svg</code> for print or monochrome contexts.</li>
+    <li>At 16×16 use <code>favicon.svg</code> (2-layer simplification) — the full mark is unreadable.</li>
+  </ul>
+
+</div>
+
+<footer>EURPE brand identity · generated <span id="date"></span></footer>
+<script>document.getElementById('date').textContent = new Date().toISOString().slice(0,10);</script>
+
+</body>
+</html>

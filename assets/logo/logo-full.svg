@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 72" role="img" aria-label="EURPE logo">
+  <title>EURPE</title>
+  <!-- Mark scaled from 64×64 to 56×56, positioned at (8,8). transform = translate(8,8) scale(0.875) -->
+  <g transform="translate(8 8) scale(0.875)">
+    <path d="M8 12 H56 V20 H8 Z" fill="#0A1F44"/>
+    <path d="M8 28 H40 V36 H8 Z" fill="#0A1F44"/>
+    <path d="M8 44 H56 V52 H8 Z" fill="#0A1F44"/>
+    <circle cx="48" cy="32" r="4" fill="#FFD617"/>
+  </g>
+  <text x="80" y="46" font-family="Inter, 'Helvetica Neue', Arial, sans-serif"
+        font-weight="700" font-size="32" letter-spacing="2" fill="#0A1F44">EURPE</text>
+</svg>

@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" role="img" aria-label="EURPE favicon">
+  <title>EURPE</title>
+  <!-- Simplified 2-layer mark: top + bottom bars (middle dropped for 16px legibility),
+       gold accent preserved. Geometry derived from logo-mark.svg via scale(0.25). -->
+  <rect x="2" y="3" width="12" height="2" fill="#0A1F44"/>
+  <rect x="2" y="11" width="12" height="2" fill="#0A1F44"/>
+  <circle cx="12" cy="8" r="1.5" fill="#FFD617"/>
+</svg>

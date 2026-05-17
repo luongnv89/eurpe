@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="EURPE icon">
+  <title>EURPE</title>
+  <!-- Rounded-square background, EU navy -->
+  <rect x="0" y="0" width="512" height="512" rx="96" ry="96" fill="#0A1F44"/>
+  <!-- Mark scaled from 64×64 to 384×384, centered: translate(64,64) scale(6) -->
+  <!-- Bars and dot recolored for contrast on navy: bars paper, dot EU gold -->
+  <g transform="translate(64 64) scale(6)">
+    <path d="M8 12 H56 V20 H8 Z" fill="#FAFAFA"/>
+    <path d="M8 28 H40 V36 H8 Z" fill="#FAFAFA"/>
+    <path d="M8 44 H56 V52 H8 Z" fill="#FAFAFA"/>
+    <circle cx="48" cy="32" r="4" fill="#FFD617"/>
+  </g>
+</svg>

@@ -50,6 +50,16 @@ const config: Config = {
           DEFAULT: "hsl(var(--card))",
           foreground: "hsl(var(--card-foreground))",
         },
+        // EURPE brand palette — use directly when the shadcn semantic tokens
+        // are not appropriate (logos, marketing surfaces, status accents).
+        // Gold is an accent only — never a fill or background.
+        brand: {
+          navy: "#0A1F44",
+          gold: "#FFD617",
+          paper: "#FAFAFA",
+          ink: "#111827",
+          muted: "#6B7280",
+        },
       },
       borderRadius: {
         lg: "var(--radius)",
