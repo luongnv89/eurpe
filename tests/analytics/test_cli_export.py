@@ -126,8 +126,9 @@ def test_export_without_output_fails(isolated_workspace: Path) -> None:
         ["analytics", "export", "--config", str(config_path)],
     )
     assert result.exit_code != 0
-    # Typer's missing-option message names the flag.
-    assert "--output" in (result.output + (result.stderr or ""))
+    # Typer/Rich may style option dashes differently across versions;
+    # the missing-option message must still name the option.
+    assert "output" in (result.output + (result.stderr or "")).lower()
 
 
 # ---------------------------------------------------------------------------

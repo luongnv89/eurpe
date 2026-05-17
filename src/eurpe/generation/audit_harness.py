@@ -468,7 +468,8 @@ class ReleaseAuditHarness:
             return paths
 
         effective_seed = seed if seed is not None else _DEFAULT_SAMPLE_SEED
-        rng = random.Random(effective_seed)
+        # Deterministic release-audit sampling, not security randomness.
+        rng = random.Random(effective_seed)  # nosec B311
         picked = rng.sample(paths, sample_size)
         return sorted(picked, key=lambda p: p.as_posix())
 

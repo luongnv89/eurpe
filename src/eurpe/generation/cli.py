@@ -602,7 +602,8 @@ def section(
                         section_type=section_enum.value,
                     )
                 )
-            except Exception:  # pragma: no cover - analytics failures must not break export
+            # Analytics failures must not block the user's export artefacts.
+            except Exception:  # pragma: no cover  # nosec B110
                 pass
 
     sys.stdout.flush()
