@@ -439,12 +439,15 @@ class IterateSectionRequest(BaseModel):
     )
     max_iterations: int = Field(
         default=3,
-        ge=1,
+        ge=2,
         le=5,
         description=(
-            "User-configured ceiling on iteration count. AC #1 of issue #16: "
-            "‘User can set critic iterations between 1 and 5 before "
-            "generation.’ Bounded to [1, 5] at the wire."
+            "User-configured ceiling on iteration count. AC #1 of issue #16 "
+            "advertises [1, 5] at the workspace, but the /iterate endpoint "
+            "is by definition past the first pass — ``max_iterations=1`` "
+            "would leave no room for the critic. Bounded to [2, 5] at the "
+            "wire so a bypassed client gets a clean 422 instead of a 500 "
+            "from the service-layer GenerationError guard."
         ),
     )
     prior_draft: GenerateSectionResponse = Field(

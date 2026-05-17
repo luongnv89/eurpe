@@ -442,11 +442,18 @@ class TestIterateSectionRoute:
         assert body["iteration_index"] == 2
         assert body["stopped"] is True
 
-    @pytest.mark.parametrize("invalid", [0, 6, 100])
-    def test_max_iterations_outside_one_to_five_returns_422(
+    @pytest.mark.parametrize("invalid", [0, 1, 6, 100])
+    def test_max_iterations_outside_two_to_five_returns_422(
         self, configured_app: TestClient, invalid: int
     ) -> None:
-        """AC #1 boundary — Pydantic ge=1, le=5 surfaces a 422."""
+        """AC #1 boundary — Pydantic ge=2, le=5 on /iterate surfaces a 422.
+
+        ``max_iterations=1`` is rejected at the wire because the iterate
+        endpoint, by definition, runs *past* the first pass: a cap of 1
+        leaves no room for the critic. The workspace-facing AC #1 ceiling
+        of 1-5 still holds — the ``1`` choice maps to "no critic at all"
+        and uses the single-pass /section endpoint, not /iterate.
+        """
 
         _override_with(configured_app, "happy")
         payload = _iterate_payload()
