@@ -13,6 +13,7 @@ import typer
 
 from eurpe import __version__
 from eurpe.analytics.cli import analytics_app
+from eurpe.benchmarks.cli import benchmark_app
 from eurpe.config import (
     DEFAULT_CONFIG_PATH,
     EXAMPLE_CONFIG_PATH,
@@ -65,6 +66,12 @@ app.add_typer(generate_app, name="generate")
 # path that copies the analytics JSONL log outside the runtime
 # directory (issue #13 AC3).
 app.add_typer(analytics_app, name="analytics")
+
+# ``eurpe benchmark all`` / ``benchmark indexing`` / ``benchmark
+# retrieval`` / ``benchmark generation`` live in the benchmarks
+# package — same mount pattern. The harness measures latency
+# against the PRD's v1 performance targets (issue #19 / Task 3.5).
+app.add_typer(benchmark_app, name="benchmark")
 
 
 @app.command()
