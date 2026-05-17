@@ -39,6 +39,14 @@ from eurpe.generation.audit import (
     AuditSeverity,
     CitationAudit,
 )
+from eurpe.generation.audit_harness import (
+    CitationAuditRow,
+    DraftAuditResult,
+    ReleaseAuditHarness,
+    ReleaseAuditHarnessError,
+    ReleaseAuditReport,
+    has_release_blocking_findings,
+)
 from eurpe.generation.critic import CriticAgent, build_requirements_checked
 from eurpe.generation.critic_loop import (
     DEFAULT_MAX_ITERATIONS,
@@ -93,10 +101,12 @@ __all__ = [
     "AuditResult",
     "AuditSeverity",
     "CitationAudit",
+    "CitationAuditRow",
     "CitationRef",
     "CriticAgent",
     "CriticLoopWorkflow",
     "DeterministicLLMClient",
+    "DraftAuditResult",
     "DraftingProfile",
     "GenerationDraft",
     "GenerationError",
@@ -109,11 +119,15 @@ __all__ = [
     "MarkdownCitationRenderer",
     "OfflineLLMError",
     "OllamaLLMClient",
+    "ReleaseAuditHarness",
+    "ReleaseAuditHarnessError",
+    "ReleaseAuditReport",
     "SectionGenerationRequest",
     "SectionGenerationWorkflow",
     "SectionIterationRequest",
     "SectionPromptBuilder",
     "build_requirements_checked",
+    "has_release_blocking_findings",
     "list_available_profiles",
     "load_profile",
     "make_llm_client",
