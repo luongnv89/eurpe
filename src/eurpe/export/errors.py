@@ -18,9 +18,12 @@ class ExportError(Exception):
 class UnsupportedExportFormatError(ExportError):
     """Raised when the requested :class:`ExportFormat` has no renderer wired up.
 
-    DOCX is on the roadmap (Task 3.3) but ships behind this error in the
-    MVP. The enum slot exists so call sites and the wire schema don't
-    change when DOCX lands.
+    Both :attr:`~eurpe.export.ExportFormat.MARKDOWN` and
+    :attr:`~eurpe.export.ExportFormat.DOCX` are supported today; this
+    error is the reserved slot for future formats (e.g., PDF) whose
+    enum member may exist before the renderer ships. Keeping the error
+    type stable means call sites and the wire schema can already
+    speak the value while the renderer is wired up.
     """
 
 

@@ -178,6 +178,23 @@ def test_export_service_run_audit_false_returns_audit_none() -> None:
     assert result.audit_passed is None
 
 
+def test_export_service_docx_run_audit_false_returns_audit_none() -> None:
+    """Issue #17: DOCX honours the ``run_audit=False`` escape hatch too.
+
+    Symmetric with the Markdown branch — confirms the audit dispatch
+    in :meth:`ExportService.export_section` runs (or skips) regardless
+    of the chosen format, so a future test or benchmark can opt out
+    consistently across formats.
+    """
+
+    service = ExportService()
+    result = service.export_section(
+        ExportRequest(draft=_make_draft(), format=ExportFormat.DOCX, run_audit=False)
+    )
+    assert result.audit_passed is None
+    assert result.content_bytes is not None
+
+
 def test_export_service_handles_empty_citations() -> None:
     """A draft with zero citations renders without raising and reports count 0."""
 
