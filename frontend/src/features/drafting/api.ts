@@ -51,6 +51,24 @@ export interface CitationPayload {
   snippet: string;
 }
 
+/**
+ * One critic-loop iteration record (Task 3.2 / issue #16).
+ *
+ * Mirrors :class:`eurpe.api.schemas.IterationRecordPayload`. The
+ * implicit first pass is NOT included in the iterations list — the
+ * draft body itself is iteration 1. Each entry in ``iterations``
+ * records a critic+regenerate pass with the changes summary and the
+ * deterministically-computed list of call/profile requirements the
+ * critic was instructed to check (AC #3).
+ */
+export interface IterationRecordPayload {
+  iteration_index: number;
+  changes_summary: string;
+  requirements_checked: string[];
+  critique_text: string;
+  generated_at: string;
+}
+
 export interface GenerateSectionResponse {
   section_type: string;
   text: string;
@@ -58,6 +76,12 @@ export interface GenerateSectionResponse {
   model: string;
   generated_at: string;
   drafting_profile: string | null;
+  /**
+   * Cumulative critic-loop history. Empty for single-pass drafts;
+   * grows by one entry per /section/iterate call. Surfaced so the UI
+   * can render an iteration timeline alongside the draft.
+   */
+  iterations: IterationRecordPayload[];
 }
 
 export class GenerationError extends Error {
@@ -123,4 +147,51 @@ export async function generateSection(
     signal,
   });
   return parseJsonOrThrow<GenerateSectionResponse>(response);
+}
+
+/**
+ * Request body for POST /api/generation/section/iterate.
+ *
+ * Mirrors :class:`eurpe.api.schemas.IterateSectionRequest`. The
+ * workspace owns the loop: it stores the original request inputs
+ * (section_type, intent, programme, profile, top_k, lessons_learned),
+ * the iteration cap (1-5), and the most recent draft, and posts this
+ * body once per iteration. Stop = stop calling (AC #2).
+ */
+export interface IterateSectionRequest {
+  section_type: string;
+  user_intent: string;
+  call_context?: string;
+  target_programme?: string | null;
+  profile_programme?: string | null;
+  top_k_examples?: number;
+  lessons_learned?: boolean;
+  max_iterations: number;
+  prior_draft: GenerateSectionResponse;
+}
+
+export interface IterateSectionResponse {
+  draft: GenerateSectionResponse;
+  iteration_index: number;
+  max_iterations: number;
+  /**
+   * True when this iteration is the last permitted (iteration_index
+   * == max_iterations). Advisory — the UI uses this to disable the
+   * "Refine" button. The user can also stop earlier by clicking
+   * "Accept draft" instead of "Refine" at any time (AC #2).
+   */
+  stopped: boolean;
+}
+
+export async function iterateSection(
+  body: IterateSectionRequest,
+  signal?: AbortSignal,
+): Promise<IterateSectionResponse> {
+  const response = await fetch("/api/generation/section/iterate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    signal,
+  });
+  return parseJsonOrThrow<IterateSectionResponse>(response);
 }

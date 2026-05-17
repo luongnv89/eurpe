@@ -1,6 +1,10 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
-import type { CitationPayload, GenerateSectionResponse } from "./api";
+import type {
+  CitationPayload,
+  GenerateSectionResponse,
+  IterationRecordPayload,
+} from "./api";
 
 interface Props {
   draft: GenerateSectionResponse;
@@ -109,8 +113,89 @@ export function DraftPreview({ draft }: Props) {
           {draft.text}
         </pre>
         <Citations citations={draft.citations} />
+        <IterationHistory iterations={draft.iterations} />
       </CardContent>
     </Card>
+  );
+}
+
+/**
+ * Render the critic-loop iteration history (Task 3.2 / issue #16).
+ *
+ * Each entry surfaces the three pieces of evidence that AC #3 requires:
+ *
+ * 1. ``iteration_index`` — which pass this is.
+ * 2. ``changes_summary`` — what changed since the prior iteration
+ *    (text/citation deltas + a one-line narrative).
+ * 3. ``requirements_checked`` — the deterministic list of call/profile
+ *    requirements the critic was instructed to evaluate.
+ *
+ * The full critique text is rendered in a collapsible details block so
+ * the summary view stays compact. Empty list (single-pass draft)
+ * renders nothing — the section header would be noise.
+ */
+function IterationHistory({
+  iterations,
+}: {
+  iterations: IterationRecordPayload[];
+}) {
+  if (iterations.length === 0) {
+    return null;
+  }
+  return (
+    <div data-testid="iteration-history">
+      <h3 className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+        Critic loop history ({iterations.length}{" "}
+        iteration{iterations.length === 1 ? "" : "s"})
+      </h3>
+      <ol className="space-y-3">
+        {iterations.map((it) => (
+          <IterationEntry key={it.iteration_index} iteration={it} />
+        ))}
+      </ol>
+    </div>
+  );
+}
+
+function IterationEntry({ iteration }: { iteration: IterationRecordPayload }) {
+  return (
+    <li
+      className="rounded-md border p-3"
+      data-testid={`iteration-${iteration.iteration_index}`}
+    >
+      <div className="flex flex-wrap items-baseline justify-between gap-2 text-sm">
+        <span className="font-medium">
+          Iteration {iteration.iteration_index}
+        </span>
+        <span className="text-xs text-muted-foreground">
+          {formatTimestamp(iteration.generated_at)}
+        </span>
+      </div>
+      <p className="mt-1 text-sm">{iteration.changes_summary}</p>
+      <div className="mt-2">
+        <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          Requirements checked ({iteration.requirements_checked.length})
+        </h4>
+        <ul className="mt-1 flex flex-wrap gap-1">
+          {iteration.requirements_checked.map((req) => (
+            <li
+              key={req}
+              className="rounded-md border bg-muted px-2 py-0.5 text-xs"
+            >
+              {req}
+            </li>
+          ))}
+        </ul>
+      </div>
+      <details className="mt-2 text-xs">
+        <summary className="cursor-pointer text-muted-foreground">
+          Show critique text
+        </summary>
+        <pre className="mt-2 whitespace-pre-wrap rounded-md bg-muted px-3 py-2 text-xs leading-relaxed">
+          {iteration.critique_text}
+        </pre>
+      </details>
+    </li>
   );
 }
 

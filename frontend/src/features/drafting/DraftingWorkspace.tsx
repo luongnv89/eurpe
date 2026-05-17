@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { AlertCircle, Loader2, Sparkles } from "lucide-react";
+import { AlertCircle, CheckCircle2, Loader2, RefreshCw, Sparkles } from "lucide-react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -27,11 +27,13 @@ import {
   fetchGenerationEnums,
   fetchProfiles,
   generateSection,
+  iterateSection,
 } from "./api";
 import type {
   GenerateSectionRequest,
   GenerateSectionResponse,
   GenerationEnumsResponse,
+  IterateSectionRequest,
   ProfilesResponse,
 } from "./api";
 import { DraftPreview } from "./DraftPreview";
@@ -48,6 +50,13 @@ const NONE_VALUE = "__none__";
 const REQUIRED_FIELDS = ["section_type", "user_intent"] as const;
 
 const DEFAULT_TOP_K = 5;
+
+// AC #1 of issue #16: "User can set critic iterations between 1 and
+// 5 before generation." Defaults to 3 per the issue body. Mirrors
+// the server-side cap (Pydantic ge=1, le=5 on max_iterations).
+const DEFAULT_MAX_ITERATIONS = 3;
+const MIN_ITERATIONS = 1;
+const MAX_ITERATIONS = 5;
 
 type ContextMode = "free" | "structured";
 
@@ -124,11 +133,22 @@ export function DraftingWorkspace() {
   const [structured, setStructured] = useState<StructuredContext>(EMPTY_STRUCTURED);
   const [topK, setTopK] = useState<string>(String(DEFAULT_TOP_K));
   const [lessonsLearned, setLessonsLearned] = useState<boolean>(false);
+  // Issue #16: configurable critic loop (AC #1).
+  const [maxIterations, setMaxIterations] = useState<string>(
+    String(DEFAULT_MAX_ITERATIONS),
+  );
 
   const [clientErrors, setClientErrors] = useState<string[]>([]);
   const [generating, setGenerating] = useState<boolean>(false);
+  const [refining, setRefining] = useState<boolean>(false);
   const [serverError, setServerError] = useState<string | null>(null);
   const [draft, setDraft] = useState<GenerateSectionResponse | null>(null);
+  // Issue #16: AC #2 — operator accepts the current draft and the
+  // loop stops. ``stoppedAtCap`` mirrors the server's ``stopped``
+  // flag so the UI can show "iteration cap reached" alongside the
+  // user's explicit accept.
+  const [accepted, setAccepted] = useState<boolean>(false);
+  const [stoppedAtCap, setStoppedAtCap] = useState<boolean>(false);
 
   useEffect(() => {
     const ctrl = new AbortController();
@@ -153,6 +173,18 @@ export function DraftingWorkspace() {
     if (!Number.isFinite(topKNum) || topKNum < 1 || topKNum > 20) {
       errors.push("top-k examples must be between 1 and 20");
     }
+    // AC #1: client-side validation mirrors the server-side Pydantic
+    // ge=1 / le=5 constraint so a bad value is caught before the round-trip.
+    const maxItNum = Number.parseInt(maxIterations, 10);
+    if (
+      !Number.isFinite(maxItNum) ||
+      maxItNum < MIN_ITERATIONS ||
+      maxItNum > MAX_ITERATIONS
+    ) {
+      errors.push(
+        `critic iterations must be between ${MIN_ITERATIONS} and ${MAX_ITERATIONS}`,
+      );
+    }
     if (errors.length > 0) {
       setClientErrors(errors);
       return;
@@ -160,6 +192,10 @@ export function DraftingWorkspace() {
     setClientErrors([]);
     setServerError(null);
     setGenerating(true);
+    // A fresh generate resets the loop state so the operator can start
+    // a new accept / refine cycle without stale flags from the prior run.
+    setAccepted(false);
+    setStoppedAtCap(false);
 
     const callContext =
       contextMode === "free" ? freeContext : buildStructuredContextString(structured);
@@ -187,6 +223,7 @@ export function DraftingWorkspace() {
     sectionType,
     userIntent,
     topK,
+    maxIterations,
     contextMode,
     freeContext,
     structured,
@@ -194,6 +231,72 @@ export function DraftingWorkspace() {
     profileProgramme,
     lessonsLearned,
   ]);
+
+  const handleRefine = useCallback(async () => {
+    if (!draft || refining || accepted || stoppedAtCap) return;
+    const maxItNum = Number.parseInt(maxIterations, 10);
+    if (
+      !Number.isFinite(maxItNum) ||
+      maxItNum < MIN_ITERATIONS ||
+      maxItNum > MAX_ITERATIONS
+    ) {
+      setServerError(
+        `critic iterations must be between ${MIN_ITERATIONS} and ${MAX_ITERATIONS}`,
+      );
+      return;
+    }
+    setServerError(null);
+    setRefining(true);
+
+    const callContext =
+      contextMode === "free" ? freeContext : buildStructuredContextString(structured);
+    const topKNum = Number.parseInt(topK, 10) || DEFAULT_TOP_K;
+
+    const body: IterateSectionRequest = {
+      section_type: sectionType,
+      user_intent: userIntent.trim(),
+      call_context: callContext,
+      target_programme: targetProgramme === NONE_VALUE ? null : targetProgramme,
+      profile_programme: profileProgramme === NONE_VALUE ? null : profileProgramme,
+      top_k_examples: topKNum,
+      lessons_learned: lessonsLearned,
+      max_iterations: maxItNum,
+      prior_draft: draft,
+    };
+
+    try {
+      const result = await iterateSection(body);
+      setDraft(result.draft);
+      setStoppedAtCap(result.stopped);
+    } catch (err) {
+      setServerError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setRefining(false);
+    }
+  }, [
+    draft,
+    refining,
+    accepted,
+    stoppedAtCap,
+    maxIterations,
+    contextMode,
+    freeContext,
+    structured,
+    sectionType,
+    userIntent,
+    targetProgramme,
+    profileProgramme,
+    topK,
+    lessonsLearned,
+  ]);
+
+  // AC #2: "User can stop the loop after any completed iteration."
+  // Accept flips the workspace into an immutable state where the
+  // Refine button is disabled. The user can still hit Reset to start
+  // a brand-new draft.
+  const handleAccept = useCallback(() => {
+    setAccepted(true);
+  }, []);
 
   function resetForm() {
     setSectionType("");
@@ -203,11 +306,33 @@ export function DraftingWorkspace() {
     setFreeContext("");
     setStructured(EMPTY_STRUCTURED);
     setTopK(String(DEFAULT_TOP_K));
+    setMaxIterations(String(DEFAULT_MAX_ITERATIONS));
     setLessonsLearned(false);
     setClientErrors([]);
     setServerError(null);
     setDraft(null);
+    setAccepted(false);
+    setStoppedAtCap(false);
   }
+
+  // The implicit first pass is iteration 1 (the draft itself); each
+  // entry in ``draft.iterations`` is a critic pass. Total iterations
+  // currently used = 1 + N records.
+  const currentIteration = draft ? 1 + draft.iterations.length : 0;
+  const maxItParsed = Number.parseInt(maxIterations, 10);
+  const effectiveMaxIterations =
+    Number.isFinite(maxItParsed) &&
+    maxItParsed >= MIN_ITERATIONS &&
+    maxItParsed <= MAX_ITERATIONS
+      ? maxItParsed
+      : DEFAULT_MAX_ITERATIONS;
+  const canRefine =
+    draft !== null &&
+    !generating &&
+    !refining &&
+    !accepted &&
+    !stoppedAtCap &&
+    currentIteration < effectiveMaxIterations;
 
   return (
     <div className="mx-auto w-full max-w-5xl space-y-6 p-6">
@@ -399,7 +524,7 @@ export function DraftingWorkspace() {
             />
           </div>
 
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-4">
             <div className="space-y-2">
               <Label htmlFor="target_programme">Programme filter</Label>
               <Select value={targetProgramme} onValueChange={setTargetProgramme}>
@@ -427,6 +552,23 @@ export function DraftingWorkspace() {
                 value={topK}
                 onChange={(e) => setTopK(e.target.value)}
               />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="max_iterations">Critic iterations</Label>
+              <Input
+                id="max_iterations"
+                type="number"
+                min={MIN_ITERATIONS}
+                max={MAX_ITERATIONS}
+                value={maxIterations}
+                onChange={(e) => setMaxIterations(e.target.value)}
+                aria-describedby="max_iterations_help"
+              />
+              <p id="max_iterations_help" className="text-xs text-muted-foreground">
+                {MIN_ITERATIONS}-{MAX_ITERATIONS}. Default 3. Use the Refine
+                button below to step through critic passes; stop any time.
+              </p>
             </div>
 
             <div className="flex items-end">
@@ -479,8 +621,63 @@ export function DraftingWorkspace() {
       </Card>
 
       {draft && (
-        <section aria-label="Generated draft" className="space-y-2">
-          <h2 className="text-2xl font-semibold tracking-tight">2. Review the draft</h2>
+        <section aria-label="Generated draft" className="space-y-4">
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <h2 className="text-2xl font-semibold tracking-tight">
+                2. Review the draft
+              </h2>
+              <p className="text-sm text-muted-foreground">
+                Iteration {currentIteration} of {effectiveMaxIterations}
+                {accepted && " — accepted"}
+                {stoppedAtCap && !accepted && " — iteration cap reached"}
+              </p>
+            </div>
+            {/* AC #2 controls: Refine runs one more critic pass; Accept
+                stops the loop. Both disappear once the user accepts
+                so the workspace state is unambiguous. */}
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={handleAccept}
+                disabled={accepted || refining}
+                aria-label="Accept this draft and stop the critic loop"
+              >
+                <CheckCircle2 className="h-4 w-4" />
+                {accepted ? "Accepted" : "Accept draft"}
+              </Button>
+              <Button
+                type="button"
+                onClick={() => void handleRefine()}
+                disabled={!canRefine}
+                aria-label="Run one more critic loop iteration"
+              >
+                {refining ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Refining…
+                  </>
+                ) : (
+                  <>
+                    <RefreshCw className="h-4 w-4" />
+                    Refine ({currentIteration}/{effectiveMaxIterations})
+                  </>
+                )}
+              </Button>
+            </div>
+          </div>
+          {stoppedAtCap && !accepted && (
+            <Alert>
+              <AlertCircle className="h-4 w-4" />
+              <AlertTitle>Iteration cap reached</AlertTitle>
+              <AlertDescription>
+                You have used all {effectiveMaxIterations} configured critic
+                iterations. Raise the cap above and regenerate to keep refining,
+                or accept this draft.
+              </AlertDescription>
+            </Alert>
+          )}
           <DraftPreview draft={draft} />
         </section>
       )}
