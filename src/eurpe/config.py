@@ -29,23 +29,56 @@ EXAMPLE_CONFIG_PATH = REPO_ROOT / "config.example.yaml"
 class ModelsConfig(BaseModel):
     """Local model runtime settings.
 
-    No URL is dialed at config-load time; ``ollama_base_url`` is recorded for
-    the ingestion/retrieval/generation modules to use later when explicitly
-    invoked by the user.
+    No URL is dialed at config-load time. Base URLs and API-key environment
+    variable names are recorded for the generation module to use later when
+    explicitly invoked by the user.
     """
 
-    runtime: str = Field(default="ollama", description="ollama | mlx | vllm")
+    runtime: str = Field(
+        default="ollama",
+        description=(
+            "ollama | mlx | openai | openrouter | groq | lmstudio | vllm | "
+            "llamacpp | anthropic | gemini"
+        ),
+    )
     llm_model: str = Field(default="llama3.1:8b")
     embedding_model: str = Field(default="nomic-embed-text")
     ollama_base_url: str = Field(default="http://localhost:11434")
+    llm_base_url: str | None = Field(
+        default=None,
+        description="Optional provider/engine base URL override for generation.",
+    )
+    llm_api_key_env: str | None = Field(
+        default=None,
+        description="Environment variable name containing the provider API key/token.",
+    )
 
     @field_validator("runtime")
     @classmethod
     def _runtime_must_be_known(cls, value: str) -> str:
-        allowed = {"ollama", "mlx", "vllm"}
-        if value not in allowed:
+        normalised = value.lower().replace("-", "").replace("_", "")
+        aliases = {
+            "llama.cpp": "llamacpp",
+            "llamacpp": "llamacpp",
+            "lmstudio": "lmstudio",
+            "lm": "lmstudio",
+        }
+        normalised = aliases.get(normalised, normalised)
+        allowed = {
+            "ollama",
+            "mlx",
+            "openai",
+            "openrouter",
+            "groq",
+            "lmstudio",
+            "vllm",
+            "llamacpp",
+            "anthropic",
+            "gemini",
+        }
+        if normalised not in allowed:
             raise ValueError(f"runtime must be one of {sorted(allowed)}, got {value!r}")
-        return value
+        return normalised
 
 
 class EurpeConfig(BaseModel):
