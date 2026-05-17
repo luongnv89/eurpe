@@ -29,7 +29,6 @@ them against the PRD targets correctly.
 
 from __future__ import annotations
 
-import shutil
 from pathlib import Path
 
 import typer

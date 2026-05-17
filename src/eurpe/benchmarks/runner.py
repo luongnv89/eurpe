@@ -45,10 +45,9 @@ import os
 import platform
 import statistics
 import time
-from collections.abc import Iterable, Sequence
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -57,7 +56,6 @@ from eurpe.generation.models import GenerationDraft, GenerationRequest
 from eurpe.generation.workflow import SectionGenerationWorkflow
 from eurpe.ingestion.models import ParsedProposal, ParsedSection
 from eurpe.retrieval import (
-    Chunk,
     ChromaIndex,
     DeterministicHashEmbedder,
     Embedder,
@@ -154,7 +152,7 @@ def capture_runtime_fingerprint(
     """
 
     if hasattr(embedder, "model"):
-        embedder_id = f"{embedder.__class__.__name__}:{getattr(embedder, 'model')}"
+        embedder_id = f"{embedder.__class__.__name__}:{embedder.model}"
     else:
         embedder_id = embedder.__class__.__name__
     return RuntimeFingerprint(
