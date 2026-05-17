@@ -1,7 +1,7 @@
 # Confidential proposal content — NEVER commit
-proposals/
-raw_proposals/
-corpus/
+/proposals/
+/raw_proposals/
+/corpus/
 *.pdf
 *.docx
 *.pptx
@@ -75,3 +75,4 @@ logs/
 
 # E2E run artefacts (created by `make e2e` / EURPE_E2E_OUTPUT_DIR).
 tests/e2e/_runs/
+.gstack/

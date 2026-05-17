@@ -14,11 +14,15 @@ const buttonVariants = cva(
         destructive:
           "bg-destructive text-destructive-foreground hover:bg-destructive/90",
         outline:
-          "border border-input bg-background hover:bg-accent hover:text-accent-foreground",
+          "border border-brand-navy/15 bg-background hover:bg-brand-parchment hover:text-brand-navy",
         secondary:
           "bg-secondary text-secondary-foreground hover:bg-secondary/80",
-        ghost: "hover:bg-accent hover:text-accent-foreground",
+        ghost: "hover:bg-brand-parchment hover:text-brand-navy",
         link: "text-primary underline-offset-4 hover:underline",
+        // Amber CTA: amber fill, navy text — 6.1:1 contrast (AA pass).
+        // Reserved for the single primary action on a page.
+        amber:
+          "bg-brand-amber text-brand-navy hover:bg-brand-amber-600 hover:text-white shadow-amber",
       },
       size: {
         default: "h-10 px-4 py-2",

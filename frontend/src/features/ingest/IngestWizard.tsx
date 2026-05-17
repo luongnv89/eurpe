@@ -12,6 +12,8 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 
+import { StepRail, WorkspaceHeader } from "@/components/WorkspaceHeader";
+
 import {
   confirmIngestion,
   fetchEnums,
@@ -108,19 +110,30 @@ export function IngestWizard() {
     setErrorMessage(null);
   }
 
+  const railSteps = [
+    { label: "Upload", state: step === "upload" ? "active" : "done" } as const,
+    {
+      label: "Confirm",
+      state:
+        step === "confirm" ? "active" : step === "success" ? "done" : "todo",
+    } as const,
+    { label: "Indexed", state: step === "success" ? "active" : "todo" } as const,
+  ];
+
   return (
-    <section
-      aria-labelledby="ingest-heading"
-      className="mx-auto w-full max-w-3xl space-y-6 p-6"
-    >
-      <header className="space-y-2">
-        <h1 id="ingest-heading" className="text-3xl font-semibold tracking-tight">
-          Ingest a proposal
-        </h1>
-        <p className="text-muted-foreground">
-          Drop a proposal PDF, review the extracted metadata, and add it to the local index.
-        </p>
-      </header>
+    <section aria-labelledby="ingest-heading">
+      <WorkspaceHeader
+        eyebrow="Workflow · Ingest"
+        title="Ingest a proposal"
+        description="Drop a proposal PDF, review the extracted metadata, and add it to the local index."
+      />
+
+      <StepRail steps={railSteps} />
+
+      <div className="mx-auto w-full max-w-3xl space-y-6 px-6 py-10 lg:px-0">
+        <h2 id="ingest-heading" className="sr-only">
+          Ingest workflow
+        </h2>
 
       {enumsError && (
         <Alert variant="destructive">
@@ -247,10 +260,13 @@ export function IngestWizard() {
                 {confirmResult.sidecar_path}
               </code>
             </div>
-            <Button onClick={reset}>Ingest another</Button>
+            <Button variant="amber" onClick={reset}>
+              Ingest another
+            </Button>
           </CardContent>
         </Card>
       )}
+      </div>
     </section>
   );
 }
