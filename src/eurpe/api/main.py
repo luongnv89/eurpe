@@ -10,6 +10,13 @@ frontend. Endpoints currently registered:
   for a parse token, persist a sidecar, and index the chunks.
 * ``GET /api/ingestion/enums`` — closed enum vocabularies for the UI
   Selects (programme, source_status).
+* ``GET /api/generation/enums`` — closed enum vocabularies for the
+  drafting workspace Selects (section_type, programme).
+* ``GET /api/generation/profiles`` — list of available drafting
+  profiles bundled with this build.
+* ``POST /api/generation/section`` — draft one proposal section using
+  indexed past-proposal evidence; returns the rendered text plus
+  citations with provenance.
 
 Run locally with::
 
@@ -30,6 +37,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from eurpe import __version__
+from eurpe.api.routes import generate as generate_routes
 from eurpe.api.routes import ingest as ingest_routes
 
 logger = logging.getLogger(__name__)
@@ -64,6 +72,7 @@ app = FastAPI(
 # Register feature routers. Each router carries its own ``prefix`` so the
 # top-level app stays free of route-by-route URL knowledge.
 app.include_router(ingest_routes.router)
+app.include_router(generate_routes.router)
 
 
 @app.get("/health")
