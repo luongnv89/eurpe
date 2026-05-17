@@ -50,21 +50,61 @@ const config: Config = {
           DEFAULT: "hsl(var(--card))",
           foreground: "hsl(var(--card-foreground))",
         },
-        // EURPE brand palette — use directly when the shadcn semantic tokens
-        // are not appropriate (logos, marketing surfaces, status accents).
-        // Gold is an accent only — never a fill or background.
+        // EURPE × Montimage blended palette. Navy anchors structure/surfaces;
+        // Amber is the single accent (CTAs, focus, active states, hairlines).
+        // Amber #E9AB34 fails AA as text on white (~2.5:1), so use it ONLY:
+        //   - as a fill behind navy text (passes 6:1), or
+        //   - as a non-text mark (underline, dot, rule, focus ring).
+        // Gold (#FFD617) is retained as a logo-internal token only — do not
+        // use in app surfaces.
         brand: {
           navy: "#0A1F44",
-          gold: "#FFD617",
+          "navy-700": "#162E5B",
+          "navy-500": "#23437A",
+          amber: "#E9AB34",
+          "amber-600": "#C68A1F",
+          "amber-100": "#FBE7B8",
           paper: "#FAFAFA",
+          parchment: "#F5F0EB",
           ink: "#111827",
           muted: "#6B7280",
+          hairline: "#E5E0D6",
+          gold: "#FFD617", // legacy / logo-internal only
         },
+      },
+      fontFamily: {
+        serif: [
+          '"Source Serif 4"',
+          '"Source Serif Pro"',
+          'Charter',
+          'Georgia',
+          'serif',
+        ],
+        sans: [
+          '"Inter"',
+          'ui-sans-serif',
+          'system-ui',
+          '-apple-system',
+          '"Segoe UI"',
+          'Roboto',
+          'sans-serif',
+        ],
+        mono: [
+          '"JetBrains Mono"',
+          'ui-monospace',
+          'SFMono-Regular',
+          'Menlo',
+          'monospace',
+        ],
       },
       borderRadius: {
         lg: "var(--radius)",
         md: "calc(var(--radius) - 2px)",
         sm: "calc(var(--radius) - 4px)",
+      },
+      boxShadow: {
+        editorial: "0 1px 0 0 rgba(10,31,68,0.04), 0 12px 24px -16px rgba(10,31,68,0.18)",
+        amber: "0 1px 0 0 rgba(198,138,31,0.4), 0 8px 18px -10px rgba(233,171,52,0.45)",
       },
       keyframes: {
         "accordion-down": {

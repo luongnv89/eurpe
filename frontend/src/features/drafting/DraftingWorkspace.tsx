@@ -22,6 +22,8 @@ import {
 } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import { WorkspaceHeader } from "@/components/WorkspaceHeader";
+import { cn } from "@/lib/utils";
 
 import {
   fetchCallContext,
@@ -407,19 +409,17 @@ export function DraftingWorkspace() {
   }
 
   return (
-    <section
-      aria-labelledby="drafting-heading"
-      className="mx-auto w-full max-w-5xl space-y-6 p-6"
-    >
-      <header className="space-y-2">
-        <h1 id="drafting-heading" className="text-3xl font-semibold tracking-tight">
-          Draft a section
-        </h1>
-        <p className="text-muted-foreground">
-          Pick a section type, point the workflow at one of your drafting profiles, and let
-          the local LLM stitch a first pass from past-proposal evidence.
-        </p>
-      </header>
+    <section aria-labelledby="drafting-heading">
+      <WorkspaceHeader
+        eyebrow="Workflow · Draft"
+        title="Draft a section"
+        description="Pick a section type, point the workflow at one of your drafting profiles, and let the local LLM stitch a first pass from past-proposal evidence."
+      />
+
+      <div className="mx-auto w-full max-w-6xl space-y-6 p-6 lg:p-10">
+        <h2 id="drafting-heading" className="sr-only">
+          Drafting workflow
+        </h2>
 
       {enumsError && (
         <Alert variant="destructive" role="alert">
@@ -746,6 +746,7 @@ export function DraftingWorkspace() {
             </Button>
             <Button
               type="button"
+              variant="amber"
               onClick={() => void handleGenerate()}
               disabled={generating}
             >
@@ -778,15 +779,30 @@ export function DraftingWorkspace() {
             <div>
               <h2
                 id="generated-draft-heading"
-                className="text-2xl font-semibold tracking-tight"
+                className="font-display text-2xl tracking-tight text-brand-navy"
               >
-                2. Review the draft
+                Review the draft
               </h2>
-              <p className="text-sm text-muted-foreground" aria-live="polite">
-                Iteration {currentIteration} of {effectiveMaxIterations}
-                {accepted && " — accepted"}
-                {stoppedAtCap && !accepted && " — iteration cap reached"}
-              </p>
+              <div className="mt-2 flex flex-wrap items-center gap-2" aria-live="polite">
+                {Array.from({ length: effectiveMaxIterations }).map((_, i) => {
+                  const done = i + 1 <= currentIteration;
+                  return (
+                    <span
+                      key={i}
+                      aria-hidden="true"
+                      className={cn(
+                        "h-1.5 w-7 rounded-full transition-colors",
+                        done ? "bg-brand-amber" : "bg-brand-navy/10",
+                      )}
+                    />
+                  );
+                })}
+                <span className="ml-1 text-sm text-brand-navy/70">
+                  Iteration {currentIteration} of {effectiveMaxIterations}
+                  {accepted && " — accepted"}
+                  {stoppedAtCap && !accepted && " — iteration cap reached"}
+                </span>
+              </div>
             </div>
             {/* AC #2 controls: Refine runs one more critic pass; Accept
                 stops the loop. Both disappear once the user accepts
@@ -804,6 +820,7 @@ export function DraftingWorkspace() {
               </Button>
               <Button
                 type="button"
+                variant="amber"
                 onClick={() => void handleRefine()}
                 disabled={!canRefine}
                 aria-label="Run one more critic loop iteration"
@@ -836,6 +853,7 @@ export function DraftingWorkspace() {
           <DraftPreview draft={draft} />
         </section>
       )}
+      </div>
     </section>
   );
 }
