@@ -779,6 +779,15 @@ def audit_release(
     contract from PRD § "Source labeling accuracy" is enforced
     end-to-end: every citation MUST visibly carry a status tag.
 
+    .. note::
+
+        Write ``--output-json`` / ``--output-markdown`` to a path
+        *outside* the audited directory. The harness walks ``DIRECTORY``
+        recursively for ``*.json`` files; an output file dropped inside
+        would be picked up as a draft on the next run and fail the
+        schema validation. Release workflows typically put outputs
+        under ``release-notes/audits/<release-tag>/`` instead.
+
     Pairs with the manual audit template at
     ``docs/release-audit-template.md`` for the human-judgement
     portion of the release gate (e.g., "is this quoted passage
