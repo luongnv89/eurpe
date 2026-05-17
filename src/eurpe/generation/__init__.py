@@ -39,6 +39,13 @@ from eurpe.generation.audit import (
     AuditSeverity,
     CitationAudit,
 )
+from eurpe.generation.critic import CriticAgent, build_requirements_checked
+from eurpe.generation.critic_loop import (
+    DEFAULT_MAX_ITERATIONS,
+    MAX_ITERATIONS_CEILING,
+    CriticLoopWorkflow,
+    IterationResult,
+)
 from eurpe.generation.errors import (
     GenerationError,
     LLMUnavailableError,
@@ -50,7 +57,12 @@ from eurpe.generation.llm import (
     OllamaLLMClient,
     make_llm_client,
 )
-from eurpe.generation.models import CitationRef, GenerationDraft, GenerationRequest
+from eurpe.generation.models import (
+    CitationRef,
+    GenerationDraft,
+    GenerationRequest,
+    IterationRecord,
+)
 from eurpe.generation.profiles import (
     DraftingProfile,
     list_available_profiles,
@@ -63,10 +75,16 @@ from eurpe.generation.render import (
     STATUS_LABEL,
     MarkdownCitationRenderer,
 )
-from eurpe.generation.service import GenerationService, SectionGenerationRequest
+from eurpe.generation.service import (
+    GenerationService,
+    SectionGenerationRequest,
+    SectionIterationRequest,
+)
 from eurpe.generation.workflow import SectionGenerationWorkflow
 
 __all__ = [
+    "DEFAULT_MAX_ITERATIONS",
+    "MAX_ITERATIONS_CEILING",
     "SECTION_GUIDANCE",
     "STATUS_BADGE",
     "STATUS_CAVEAT",
@@ -76,12 +94,16 @@ __all__ = [
     "AuditSeverity",
     "CitationAudit",
     "CitationRef",
+    "CriticAgent",
+    "CriticLoopWorkflow",
     "DeterministicLLMClient",
     "DraftingProfile",
     "GenerationDraft",
     "GenerationError",
     "GenerationRequest",
     "GenerationService",
+    "IterationRecord",
+    "IterationResult",
     "LLMClient",
     "LLMUnavailableError",
     "MarkdownCitationRenderer",
@@ -89,7 +111,9 @@ __all__ = [
     "OllamaLLMClient",
     "SectionGenerationRequest",
     "SectionGenerationWorkflow",
+    "SectionIterationRequest",
     "SectionPromptBuilder",
+    "build_requirements_checked",
     "list_available_profiles",
     "load_profile",
     "make_llm_client",

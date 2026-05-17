@@ -184,6 +184,85 @@ class GenerationRequest(BaseModel):
     )
 
 
+class IterationRecord(BaseModel):
+    """One pass through the critic loop, recorded on :class:`GenerationDraft`.
+
+    The critic loop (Task 3.2 / issue #16) runs the
+    :class:`SectionGenerationWorkflow` repeatedly, each pass producing
+    a refined draft plus a critique that explains what changed and
+    which call/profile requirements the critic checked. The first
+    pass (the initial draft) is implicit — it is recorded by the
+    ``GenerationDraft`` itself. Every *subsequent* pass appends one
+    :class:`IterationRecord` to :attr:`GenerationDraft.iterations`.
+
+    Why this lives on the draft (not in analytics)
+    ----------------------------------------------
+    The privacy contract on the analytics events (see
+    :mod:`eurpe.analytics.events` module docstring) forbids any field
+    that can carry proposal content. Critique text, change summaries,
+    and the requirements list are inherently content-bearing, so they
+    live on the draft (which already carries the draft text and the
+    prompt) and never on an analytics event. Only the integer
+    ``iteration_count`` makes it into
+    :class:`DraftCompletedEvent`.
+
+    AC #3 ("each iteration records what changed and which call/profile
+    requirements were checked") is satisfied by the
+    :attr:`changes_summary` and :attr:`requirements_checked` fields
+    being mandatory and non-empty.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    iteration_index: int = Field(
+        ge=2,
+        le=5,
+        description=(
+            "1-indexed iteration number. The initial single-pass draft is "
+            "iteration 1 (implicit, carried by the GenerationDraft "
+            "itself); the first critic pass is iteration 2, and so on. "
+            "Capped at 5 to match the user-facing AC #1 ceiling."
+        ),
+    )
+    changes_summary: str = Field(
+        min_length=1,
+        description=(
+            "Human-readable summary of what changed between the prior "
+            "draft and this iteration's draft. Built server-side from a "
+            "structural diff (char-count delta, citation-count delta) "
+            "plus a one-line natural-language summary from the critic. "
+            "AC #3 ‘what changed’ half lives here."
+        ),
+    )
+    requirements_checked: list[str] = Field(
+        min_length=1,
+        description=(
+            "List of call/profile requirements the critic was instructed "
+            "to check on this iteration. Deterministically constructed "
+            "from the drafting profile's ``expected_outputs`` for the "
+            "section, the TopicContext's ``section_guidance`` keys, and "
+            "a sentinel default-guidance entry. Never empty — the "
+            "default sentinel guarantees at least one item even with "
+            "no profile and no topic context. AC #3 ‘which "
+            "requirements were checked’ half lives here."
+        ),
+    )
+    critique_text: str = Field(
+        min_length=1,
+        max_length=4000,
+        description=(
+            "Free-text critic commentary from the LLM. Capped at 4000 "
+            "chars to keep the round-trip JSON small. The deterministic "
+            "stub produces a recognisable refrain so tests can pin it; "
+            "real LLMs produce a richer assessment."
+        ),
+    )
+    generated_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC),
+        description="UTC timestamp when this iteration completed.",
+    )
+
+
 class GenerationDraft(BaseModel):
     """Output of one section-generation call.
 
@@ -195,6 +274,18 @@ class GenerationDraft(BaseModel):
     The two helper methods give callers a one-line answer to common
     questions ("how many sources?", "is anything unlabelled?") without
     forcing them to re-implement the logic.
+
+    Critic loop iterations
+    ----------------------
+    For single-pass drafts (the Sprint 1 default and the
+    backward-compatible behaviour of :meth:`SectionGenerationWorkflow.run`)
+    :attr:`iterations` stays an empty list. When the critic loop
+    (Task 3.2 / issue #16) is exercised via
+    :meth:`GenerationService.iterate_section`, each refinement pass
+    appends one :class:`IterationRecord` to the list. The total
+    iteration count of a fully-refined draft is therefore
+    ``1 + len(draft.iterations)`` — the implicit first pass plus the
+    explicit critic passes.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -254,6 +345,28 @@ class GenerationDraft(BaseModel):
             "drafting_profile records the applied programme guidance."
         ),
     )
+    iterations: list[IterationRecord] = Field(
+        default_factory=list,
+        description=(
+            "Records of each critic-loop refinement pass beyond the "
+            "implicit first draft. Empty for single-pass workflows "
+            "(workflow.run() default), grows by one entry per "
+            "service.iterate_section() call. Pinned by the AC #2 / AC #3 "
+            "tests in tests/test_critic_loop.py."
+        ),
+    )
+
+    def total_iterations(self) -> int:
+        """Total iterations the draft has been through, including the implicit first pass.
+
+        Single-pass drafts return ``1``; a draft refined once by the
+        critic returns ``2``; etc. This is the value
+        :class:`DraftCompletedEvent.iteration_count` records (so an
+        operator browsing the analytics log can see how many critic
+        passes a draft cost without re-running the workflow).
+        """
+
+        return 1 + len(self.iterations)
 
     def has_unlabeled_citations(self) -> bool:
         """True iff any citation lacks a ``source_status``.
