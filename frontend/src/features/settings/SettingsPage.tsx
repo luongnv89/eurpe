@@ -1,4 +1,4 @@
-import { Cpu, FolderTree, ShieldCheck, Sparkles } from "lucide-react";
+import { Cpu, FolderTree, Sparkles } from "lucide-react";
 
 import {
   Card,
@@ -35,12 +35,14 @@ const SETTINGS: SettingItem[] = [
     value: "Max 5 iterations",
     hint: "Server-enforced ceiling; per-draft override in the workspace.",
   },
-  {
-    Icon: ShieldCheck,
-    label: "Network",
-    value: "Local-only",
-    hint: "EU Funding & Tenders auto-fill is the only optional outbound call.",
-  },
+  // TODO(#83): Re-enable Network & Security card when outbound features
+  // (EU Funding & Tenders auto-fill, cloud LLM fallback) are ready.
+  // {
+  //   Icon: ShieldCheck,
+  //   label: "Network",
+  //   value: "Local-only",
+  //   hint: "EU Funding & Tenders auto-fill is the only optional outbound call.",
+  // },
 ];
 
 /**
