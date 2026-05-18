@@ -559,3 +559,64 @@ class FetchCallResponse(BaseModel):
     source_url: str = Field(
         description="The URL the operator pasted, echoed back for audit.",
     )
+
+
+# ---------------------------------------------------------------------------
+# Runtime health and model listing (issue #79)
+# ---------------------------------------------------------------------------
+
+
+class RuntimeInstallInstructions(BaseModel):
+    """Step-by-step installation instructions for a local runtime."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(description="Human-readable runtime name.")
+    steps: str = Field(description="Newline-separated installation steps.")
+    docs_url: str = Field(description="Link to official documentation.")
+
+
+class RuntimeStatusResponse(BaseModel):
+    """``GET /api/runtime/status`` — health status of the configured runtime.
+
+    Returns the active runtime's name, endpoint, whether it is reachable,
+    and the list of available models (empty when unreachable).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    runtime: str = Field(description="Runtime key (e.g. 'ollama', 'vllm', 'mlx').")
+    display_name: str = Field(description="Human-readable runtime name.")
+    endpoint: str = Field(description="URL that was probed.")
+    available: bool = Field(description="True when the runtime responded to the health probe.")
+    models: list[str] = Field(
+        default_factory=list,
+        description="Model identifiers reported by the runtime. Empty when unavailable.",
+    )
+    error: str | None = Field(
+        default=None,
+        description="Human-readable error when the runtime is unavailable.",
+    )
+
+
+class AllRuntimesResponse(BaseModel):
+    """``GET /api/runtime/all`` — status of all supported local runtimes.
+
+    Returns the status of every known runtime so the Settings page can
+    let the user switch between them and see availability at a glance.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    runtimes: list[RuntimeStatusResponse] = Field(description="Status for each supported runtime.")
+    active_runtime: str = Field(description="The runtime key currently configured in config.yaml.")
+
+
+class RuntimeInstructionsResponse(BaseModel):
+    """``GET /api/runtime/instructions/{runtime}`` — setup instructions."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    instructions: RuntimeInstallInstructions = Field(
+        description="Installation instructions for the requested runtime."
+    )

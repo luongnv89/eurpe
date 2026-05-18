@@ -39,6 +39,7 @@ from fastapi import FastAPI
 from eurpe import __version__
 from eurpe.api.routes import generate as generate_routes
 from eurpe.api.routes import ingest as ingest_routes
+from eurpe.api.routes import runtime as runtime_routes
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +74,7 @@ app = FastAPI(
 # top-level app stays free of route-by-route URL knowledge.
 app.include_router(ingest_routes.router)
 app.include_router(generate_routes.router)
+app.include_router(runtime_routes.router)
 
 
 @app.get("/health")

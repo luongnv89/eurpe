@@ -1,0 +1,165 @@
+"""Tests for the local runtime health probe module (issue #79).
+
+These tests verify the probe logic without requiring real runtimes.
+The TCP probes are monkeypatched to simulate reachable/unreachable
+states, and the HTTP-level probe functions are tested via
+``respx``-style mocking of the inner helper.
+"""
+
+from __future__ import annotations
+
+import pytest
+
+from eurpe.api.runtime_probe import (
+    RUNTIME_REGISTRY,
+    RuntimeStatus,
+    get_install_instructions,
+    probe_runtime,
+)
+
+
+class TestProbeRuntime:
+    """Verify probe_runtime dispatches correctly and handles failures."""
+
+    def test_unknown_runtime(self) -> None:
+        result = probe_runtime("nonexistent")
+        assert not result.available
+        assert "Unknown runtime" in (result.error or "")
+
+    def test_ollama_unreachable(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(
+            "eurpe.api.runtime_probe._tcp_probe",
+            lambda *_args, **_kwargs: False,
+        )
+        result = probe_runtime("ollama")
+        assert not result.available
+        assert result.name == "Ollama"
+        assert result.endpoint == "http://localhost:11434"
+        assert result.models == []
+        assert "Cannot reach Ollama" in (result.error or "")
+
+    def test_ollama_reachable_with_models(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(
+            "eurpe.api.runtime_probe._tcp_probe",
+            lambda *_args, **_kwargs: True,
+        )
+        # Replace the entire _probe_ollama function with a stub
+        monkeypatch.setattr(
+            "eurpe.api.runtime_probe._probe_ollama",
+            lambda _url: RuntimeStatus(
+                name="Ollama",
+                endpoint="http://localhost:11434",
+                available=True,
+                models=["llama3.1:8b", "nomic-embed-text"],
+            ),
+        )
+        result = probe_runtime("ollama")
+        assert result.available
+        assert result.models == ["llama3.1:8b", "nomic-embed-text"]
+
+    def test_ollama_reachable_no_models(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(
+            "eurpe.api.runtime_probe._tcp_probe",
+            lambda *_args, **_kwargs: True,
+        )
+        monkeypatch.setattr(
+            "eurpe.api.runtime_probe._probe_ollama",
+            lambda _url: RuntimeStatus(
+                name="Ollama",
+                endpoint="http://localhost:11434",
+                available=True,
+                models=[],
+            ),
+        )
+        result = probe_runtime("ollama")
+        assert result.available
+        assert result.models == []
+
+    def test_ollama_http_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(
+            "eurpe.api.runtime_probe._tcp_probe",
+            lambda *_args, **_kwargs: True,
+        )
+        monkeypatch.setattr(
+            "eurpe.api.runtime_probe._probe_ollama",
+            lambda _url: RuntimeStatus(
+                name="Ollama",
+                endpoint="http://localhost:11434",
+                available=False,
+                error="Ollama returned HTTP 500",
+            ),
+        )
+        result = probe_runtime("ollama")
+        assert not result.available
+        assert "HTTP 500" in (result.error or "")
+
+    def test_vllm_unreachable(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(
+            "eurpe.api.runtime_probe._tcp_probe",
+            lambda *_args, **_kwargs: False,
+        )
+        result = probe_runtime("vllm")
+        assert not result.available
+        assert result.name == "vLLM"
+        assert "Cannot reach vLLM" in (result.error or "")
+
+    def test_mlx_unreachable(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(
+            "eurpe.api.runtime_probe._tcp_probe",
+            lambda *_args, **_kwargs: False,
+        )
+        result = probe_runtime("mlx")
+        assert not result.available
+        assert result.name == "MLX (Apple Silicon)"
+        assert "Cannot reach MLX" in (result.error or "")
+
+    def test_custom_base_url(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(
+            "eurpe.api.runtime_probe._tcp_probe",
+            lambda *_args, **_kwargs: False,
+        )
+        result = probe_runtime("ollama", base_url="http://127.0.0.1:9999")
+        assert result.endpoint == "http://127.0.0.1:9999"
+
+
+class TestGetInstallInstructions:
+    """Verify installation instructions are returned for known runtimes."""
+
+    def test_ollama_instructions(self) -> None:
+        inst = get_install_instructions("ollama")
+        assert inst["title"] == "Ollama"
+        assert "ollama.com/download" in inst["steps"]
+        assert "ollama pull" in inst["steps"]
+        assert inst["docs_url"] == "https://ollama.com/download"
+
+    def test_vllm_instructions(self) -> None:
+        inst = get_install_instructions("vllm")
+        assert inst["title"] == "vLLM"
+        assert "pip install vllm" in inst["steps"]
+        assert inst["docs_url"] == "https://docs.vllm.ai/en/latest/"
+
+    def test_mlx_instructions(self) -> None:
+        inst = get_install_instructions("mlx")
+        assert inst["title"] == "MLX (Apple Silicon)"
+        assert "pip install mlx mlx-lm" in inst["steps"]
+        assert inst["docs_url"] == "https://ml-explore.github.io/mlx/"
+
+    def test_unknown_runtime(self) -> None:
+        inst = get_install_instructions("nonexistent")
+        assert inst["title"] == "nonexistent"
+        assert "No installation instructions" in inst["steps"]
+
+
+class TestRuntimeRegistry:
+    """Verify the registry contains all expected runtimes."""
+
+    def test_known_runtimes(self) -> None:
+        assert "ollama" in RUNTIME_REGISTRY
+        assert "mlx" in RUNTIME_REGISTRY
+        assert "vllm" in RUNTIME_REGISTRY
+
+    def test_registry_entries_have_required_fields(self) -> None:
+        for key, info in RUNTIME_REGISTRY.items():
+            assert "display_name" in info, f"{key} missing display_name"
+            assert "default_url" in info, f"{key} missing default_url"
+            assert "docs_url" in info, f"{key} missing docs_url"
