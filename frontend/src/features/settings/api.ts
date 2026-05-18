@@ -1,11 +1,59 @@
 /**
- * Typed fetch helpers for the ``/api/runtime`` routes (issue #79).
+ * Typed fetch helpers for the Settings page.
  *
- * Mirrors the pattern in ``frontend/src/features/drafting/api.ts``:
- * relative URLs (Vite proxies ``/api`` to the FastAPI app), one
- * ``RuntimeError`` per failure mode, and a shared error-detail
- * extractor.
+ * Combines configuration editing (`/api/config`), local runtime probes
+ * (`/api/runtime`), and explicit cloud-provider connection tests
+ * (`/api/cloud/test`). All URLs are relative so Vite proxies them to the
+ * local FastAPI app.
  */
+
+// ---------------------------------------------------------------------------
+// Configuration editing (issue #74)
+// ---------------------------------------------------------------------------
+
+export interface NetworkAllowlistEntry {
+  host: string;
+  port: number;
+  reason: string;
+}
+
+export interface ModelsConfig {
+  runtime: string;
+  llm_model: string;
+  embedding_model: string;
+  ollama_base_url: string;
+  llm_base_url: string | null;
+  llm_api_key_env: string | null;
+}
+
+export interface ConfigResponse {
+  corpus_path: string;
+  index_path: string;
+  runtime_dir: string;
+  offline_mode: boolean;
+  log_level: string;
+  models: ModelsConfig;
+  network_allowlist: NetworkAllowlistEntry[];
+}
+
+export interface ConfigUpdateRequest {
+  corpus_path?: string | null;
+  index_path?: string | null;
+  runtime_dir?: string | null;
+  offline_mode?: boolean | null;
+  log_level?: string | null;
+  models?: Partial<ModelsConfig> | null;
+  network_allowlist?: NetworkAllowlistEntry[] | null;
+}
+
+export interface ConfigUpdateResponse {
+  ok: boolean;
+  config: ConfigResponse;
+}
+
+// ---------------------------------------------------------------------------
+// Runtime health and model listing (issues #79 / #81)
+// ---------------------------------------------------------------------------
 
 export interface RuntimeStatus {
   /** Runtime key (e.g. 'ollama', 'vllm', 'mlx'). */
@@ -42,14 +90,58 @@ export interface RuntimeInstructionsResponse {
   instructions: InstallInstructions;
 }
 
-export class RuntimeError extends Error {
+export interface LocalModelTestRequest {
+  runtime: string;
+  model: string;
+  base_url?: string | null;
+}
+
+export interface LocalEmbeddingTestRequest {
+  runtime: string;
+  model: string;
+  base_url?: string | null;
+}
+
+export interface LocalModelTestResponse {
+  success: boolean;
+  message: string;
+  error_detail: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// Cloud provider connection test (issue #80)
+// ---------------------------------------------------------------------------
+
+export interface CloudProviderTestRequest {
+  provider: string;
+  model: string;
+  api_key: string;
+}
+
+export interface CloudProviderTestResponse {
+  success: boolean;
+  message: string;
+  model_confirmed: string | null;
+  error_detail: string | null;
+}
+
+export class SettingsError extends Error {
   status: number;
   detail: string;
+
   constructor(status: number, detail: string) {
     super(detail);
-    this.name = "RuntimeError";
+    this.name = "SettingsError";
     this.status = status;
     this.detail = detail;
+  }
+}
+
+// Backwards-compatible name for the runtime helper introduced by issue #79.
+export class RuntimeError extends SettingsError {
+  constructor(status: number, detail: string) {
+    super(status, detail);
+    this.name = "RuntimeError";
   }
 }
 
@@ -57,6 +149,15 @@ async function readErrorDetail(response: Response): Promise<string> {
   try {
     const body = await response.json();
     if (typeof body?.detail === "string") return body.detail;
+    if (Array.isArray(body?.detail) && body.detail.length > 0) {
+      const first = body.detail[0];
+      const loc = Array.isArray(first?.loc)
+        ? first.loc.filter((p: unknown) => typeof p === "string").join(".")
+        : "";
+      return loc
+        ? `${loc}: ${first?.msg ?? "validation error"}`
+        : (first?.msg ?? "validation error");
+    }
     return JSON.stringify(body);
   } catch {
     return response.statusText || `request failed with status ${response.status}`;
@@ -65,9 +166,27 @@ async function readErrorDetail(response: Response): Promise<string> {
 
 async function parseJsonOrThrow<T>(response: Response): Promise<T> {
   if (!response.ok) {
-    throw new RuntimeError(response.status, await readErrorDetail(response));
+    throw new SettingsError(response.status, await readErrorDetail(response));
   }
   return (await response.json()) as T;
+}
+
+export async function fetchConfig(signal?: AbortSignal): Promise<ConfigResponse> {
+  const response = await fetch("/api/config", { signal });
+  return parseJsonOrThrow<ConfigResponse>(response);
+}
+
+export async function updateConfig(
+  body: ConfigUpdateRequest,
+  signal?: AbortSignal,
+): Promise<ConfigUpdateResponse> {
+  const response = await fetch("/api/config", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    signal,
+  });
+  return parseJsonOrThrow<ConfigUpdateResponse>(response);
 }
 
 export async function fetchRuntimeStatus(signal?: AbortSignal): Promise<RuntimeStatus> {
@@ -88,23 +207,6 @@ export async function fetchRuntimeInstructions(
   return parseJsonOrThrow<RuntimeInstructionsResponse>(response);
 }
 
-// ---------------------------------------------------------------------------
-// Cloud provider connection test (issue #80)
-// ---------------------------------------------------------------------------
-
-export interface CloudProviderTestRequest {
-  provider: string;
-  model: string;
-  api_key: string;
-}
-
-export interface CloudProviderTestResponse {
-  success: boolean;
-  message: string;
-  model_confirmed: string | null;
-  error_detail: string | null;
-}
-
 export async function testCloudProviderConnection(
   body: CloudProviderTestRequest,
   signal?: AbortSignal,
@@ -116,28 +218,6 @@ export async function testCloudProviderConnection(
     signal,
   });
   return parseJsonOrThrow<CloudProviderTestResponse>(response);
-}
-
-// ---------------------------------------------------------------------------
-// Local model and embedding test (issue #81)
-// ---------------------------------------------------------------------------
-
-export interface LocalModelTestRequest {
-  runtime: string;
-  model: string;
-  base_url?: string | null;
-}
-
-export interface LocalEmbeddingTestRequest {
-  runtime: string;
-  model: string;
-  base_url?: string | null;
-}
-
-export interface LocalModelTestResponse {
-  success: boolean;
-  message: string;
-  error_detail: string | null;
 }
 
 export async function testLocalModel(

@@ -562,6 +562,106 @@ class FetchCallResponse(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Settings / configuration (issue #74)
+# ---------------------------------------------------------------------------
+
+
+class NetworkAllowlistEntry(BaseModel):
+    """One network allowlist entry exposed to the Settings UI."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    host: str = Field(min_length=1, description="Host to allow egress to.")
+    port: int = Field(ge=1, le=65535, description="TCP port.")
+    reason: str = Field(min_length=1, description="Operator-provided reason for audit trail.")
+
+
+class ModelsConfigResponse(BaseModel):
+    """Models section of the config, returned to the Settings UI."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    runtime: str = Field(description="LLM runtime (ollama, openai, anthropic, etc.).")
+    llm_model: str = Field(description="Model identifier.")
+    embedding_model: str = Field(description="Embedding model identifier.")
+    ollama_base_url: str = Field(description="Ollama base URL.")
+    llm_base_url: str | None = Field(default=None, description="Optional LLM base URL override.")
+    llm_api_key_env: str | None = Field(
+        default=None,
+        description="Environment variable name for the LLM API key.",
+    )
+
+
+class ModelsConfigUpdate(BaseModel):
+    """Partial models config for ``PUT /api/config`` — all fields optional."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    runtime: str | None = Field(default=None)
+    llm_model: str | None = Field(default=None)
+    embedding_model: str | None = Field(default=None)
+    ollama_base_url: str | None = Field(default=None)
+    llm_base_url: str | None = Field(default=None)
+    llm_api_key_env: str | None = Field(default=None)
+
+
+class ConfigResponse(BaseModel):
+    """Full configuration returned by ``GET /api/config``.
+
+    Secret values (API keys) are NEVER returned. The UI reads the env var
+    name from ``llm_api_key_env`` and shows a masked input for the actual
+    secret, which the user sets in their shell environment.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    corpus_path: str = Field(description="Path to the corpus directory.")
+    index_path: str = Field(description="Path to the vector index directory.")
+    runtime_dir: str = Field(description="Path to the runtime state directory.")
+    offline_mode: bool = Field(description="Whether offline mode is enabled.")
+    log_level: str = Field(description="Logging verbosity level.")
+    models: ModelsConfigResponse = Field(description="Model runtime configuration.")
+    network_allowlist: list[NetworkAllowlistEntry] = Field(
+        default_factory=list,
+        description="Network egress allowlist.",
+    )
+
+
+class ConfigUpdateRequest(BaseModel):
+    """Request body for ``PUT /api/config``.
+
+    All fields are optional — only supplied fields are updated. The
+    server reads the current config, merges the changes, validates, and
+    persists back to config.yaml.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    corpus_path: str | None = Field(default=None, description="Path to the corpus directory.")
+    index_path: str | None = Field(default=None, description="Path to the vector index.")
+    runtime_dir: str | None = Field(default=None, description="Path to the runtime state dir.")
+    offline_mode: bool | None = Field(default=None, description="Toggle offline mode.")
+    log_level: str | None = Field(default=None, description="Logging verbosity level.")
+    models: ModelsConfigUpdate | None = Field(
+        default=None,
+        description="Model runtime configuration overrides.",
+    )
+    network_allowlist: list[NetworkAllowlistEntry] | None = Field(
+        default=None,
+        description="Network egress allowlist.",
+    )
+
+
+class ConfigUpdateResponse(BaseModel):
+    """Response from ``PUT /api/config``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    ok: bool = Field(description="Whether the update succeeded.")
+    config: ConfigResponse = Field(description="The updated effective configuration.")
+
+
+# ---------------------------------------------------------------------------
 # Runtime health and model listing (issue #79)
 # ---------------------------------------------------------------------------
 
