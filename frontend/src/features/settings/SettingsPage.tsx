@@ -1,4 +1,4 @@
-import { Cpu, FolderTree, Sparkles } from "lucide-react";
+import { Cpu, Database, FolderTree, Sparkles } from "lucide-react";
 
 import {
   Card,
@@ -16,18 +16,12 @@ interface SettingItem {
   hint: string;
 }
 
-const SETTINGS: SettingItem[] = [
+const LLM_SETTINGS: SettingItem[] = [
   {
     Icon: Cpu,
-    label: "Local LLM",
+    label: "LLM runtime",
     value: "Ollama · llama3.1:8b",
-    hint: "Edit config.yaml → llm.model to switch.",
-  },
-  {
-    Icon: FolderTree,
-    label: "Index path",
-    value: "./data/index",
-    hint: "Delete the folder to reset the corpus.",
+    hint: "Edit config.yaml → models.llm_model to switch.",
   },
   {
     Icon: Sparkles,
@@ -35,15 +29,34 @@ const SETTINGS: SettingItem[] = [
     value: "Max 5 iterations",
     hint: "Server-enforced ceiling; per-draft override in the workspace.",
   },
-  // TODO(#83): Re-enable Network & Security card when outbound features
-  // (EU Funding & Tenders auto-fill, cloud LLM fallback) are ready.
-  // {
-  //   Icon: ShieldCheck,
-  //   label: "Network",
-  //   value: "Local-only",
-  //   hint: "EU Funding & Tenders auto-fill is the only optional outbound call.",
-  // },
 ];
+
+const EMBEDDING_SETTINGS: SettingItem[] = [
+  {
+    Icon: Database,
+    label: "Embedding model",
+    value: "nomic-embed-text",
+    hint: "Edit config.yaml → models.embedding_model to switch. Used for vector ingestion and semantic search.",
+  },
+];
+
+const INDEX_SETTINGS: SettingItem[] = [
+  {
+    Icon: FolderTree,
+    label: "Index path",
+    value: "./data/index",
+    hint: "Delete the folder to reset the corpus.",
+  },
+];
+
+// TODO(#83): Re-enable Network & Security card when outbound features
+// (EU Funding & Tenders auto-fill, cloud LLM fallback) are ready.
+// {
+//   Icon: ShieldCheck,
+//   label: "Network",
+//   value: "Local-only",
+//   hint: "EU Funding & Tenders auto-fill is the only optional outbound call.",
+// },
 
 /**
  * Settings page — read-only summary of effective config in v1. The
@@ -64,33 +77,104 @@ export function SettingsPage() {
           Effective configuration
         </h2>
 
-        <ul className="grid gap-4 sm:grid-cols-2">
-          {SETTINGS.map(({ Icon, label, value, hint }) => (
-            <li key={label}>
-              <Card className="border-brand-navy/10 shadow-editorial">
-                <CardHeader className="pb-2">
-                  <CardTitle className="flex items-center gap-2 text-sm font-medium text-brand-navy/65">
-                    <span
-                      aria-hidden="true"
-                      className="inline-flex h-7 w-7 items-center justify-center rounded bg-brand-parchment text-brand-navy ring-1 ring-brand-navy/10"
-                    >
-                      <Icon className="h-3.5 w-3.5" aria-hidden="true" />
-                    </span>
-                    {label}
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <p className="font-display text-xl text-brand-navy">
-                    {value}
-                  </p>
-                  <p className="mt-2 text-xs leading-relaxed text-brand-navy/60">
-                    {hint}
-                  </p>
-                </CardContent>
-              </Card>
-            </li>
-          ))}
-        </ul>
+        <div>
+          <h3 className="mb-3 font-display text-sm font-medium uppercase tracking-[0.12em] text-brand-navy/55">
+            LLM generation
+          </h3>
+          <ul className="grid gap-4 sm:grid-cols-2">
+            {LLM_SETTINGS.map(({ Icon, label, value, hint }) => (
+              <li key={label}>
+                <Card className="border-brand-navy/10 shadow-editorial">
+                  <CardHeader className="pb-2">
+                    <CardTitle className="flex items-center gap-2 text-sm font-medium text-brand-navy/65">
+                      <span
+                        aria-hidden="true"
+                        className="inline-flex h-7 w-7 items-center justify-center rounded bg-brand-parchment text-brand-navy ring-1 ring-brand-navy/10"
+                      >
+                        <Icon className="h-3.5 w-3.5" aria-hidden="true" />
+                      </span>
+                      {label}
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <p className="font-display text-xl text-brand-navy">
+                      {value}
+                    </p>
+                    <p className="mt-2 text-xs leading-relaxed text-brand-navy/60">
+                      {hint}
+                    </p>
+                  </CardContent>
+                </Card>
+              </li>
+            ))}
+          </ul>
+        </div>
+
+        <div>
+          <h3 className="mb-3 font-display text-sm font-medium uppercase tracking-[0.12em] text-brand-navy/55">
+            Embeddings &amp; vector search
+          </h3>
+          <ul className="grid gap-4 sm:grid-cols-2">
+            {EMBEDDING_SETTINGS.map(({ Icon, label, value, hint }) => (
+              <li key={label}>
+                <Card className="border-brand-navy/10 shadow-editorial">
+                  <CardHeader className="pb-2">
+                    <CardTitle className="flex items-center gap-2 text-sm font-medium text-brand-navy/65">
+                      <span
+                        aria-hidden="true"
+                        className="inline-flex h-7 w-7 items-center justify-center rounded bg-brand-parchment text-brand-navy ring-1 ring-brand-navy/10"
+                      >
+                        <Icon className="h-3.5 w-3.5" aria-hidden="true" />
+                      </span>
+                      {label}
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <p className="font-display text-xl text-brand-navy">
+                      {value}
+                    </p>
+                    <p className="mt-2 text-xs leading-relaxed text-brand-navy/60">
+                      {hint}
+                    </p>
+                  </CardContent>
+                </Card>
+              </li>
+            ))}
+          </ul>
+        </div>
+
+        <div>
+          <h3 className="mb-3 font-display text-sm font-medium uppercase tracking-[0.12em] text-brand-navy/55">
+            Index
+          </h3>
+          <ul className="grid gap-4 sm:grid-cols-2">
+            {INDEX_SETTINGS.map(({ Icon, label, value, hint }) => (
+              <li key={label}>
+                <Card className="border-brand-navy/10 shadow-editorial">
+                  <CardHeader className="pb-2">
+                    <CardTitle className="flex items-center gap-2 text-sm font-medium text-brand-navy/65">
+                      <span
+                        aria-hidden="true"
+                        className="inline-flex h-7 w-7 items-center justify-center rounded bg-brand-parchment text-brand-navy ring-1 ring-brand-navy/10"
+                      >
+                        <Icon className="h-3.5 w-3.5" aria-hidden="true" />
+                      </span>
+                      {label}
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <p className="font-display text-xl text-brand-navy">
+                      {value}
+                    </p>
+                    <p className="mt-2 text-xs leading-relaxed text-brand-navy/60">
+                      {hint}
+                    </p>
+                  </CardContent>
+                </Card>
+              </li>
+            ))}
+          </ul>
+        </div>
 
         <Card className="border-brand-amber/40 bg-brand-amber/[0.08] shadow-editorial">
           <CardHeader>
