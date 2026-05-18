@@ -13,6 +13,8 @@ import pytest
 from eurpe.api.runtime_probe import (
     RUNTIME_REGISTRY,
     RuntimeStatus,
+    check_local_embedding,
+    check_local_model_generation,
     get_install_instructions,
     probe_runtime,
 )
@@ -163,3 +165,152 @@ class TestRuntimeRegistry:
             assert "display_name" in info, f"{key} missing display_name"
             assert "default_url" in info, f"{key} missing default_url"
             assert "docs_url" in info, f"{key} missing docs_url"
+
+
+class TestLocalModelGeneration:
+    """Verify check_local_model_generation handles various scenarios."""
+
+    def test_unknown_runtime(self) -> None:
+        result = check_local_model_generation("nonexistent", "some-model")
+        assert not result["success"]
+        assert "Unknown runtime" in result["message"]
+
+    def test_runtime_unreachable(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(
+            "eurpe.api.runtime_probe._tcp_probe",
+            lambda *_args, **_kwargs: False,
+        )
+        result = check_local_model_generation("ollama", "llama3.1:8b")
+        assert not result["success"]
+        assert "not reachable" in result["message"]
+
+    def test_ollama_success(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(
+            "eurpe.api.runtime_probe._tcp_probe",
+            lambda *_args, **_kwargs: True,
+        )
+
+        class FakeResponse:
+            status_code = 200
+
+        class FakeClient:
+            def __init__(self, timeout=None):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                pass
+
+            def post(self, url, json):
+                return FakeResponse()
+
+        monkeypatch.setattr("httpx.Client", lambda **kwargs: FakeClient())
+        result = check_local_model_generation("ollama", "llama3.1:8b")
+        assert result["success"]
+        assert "loaded and responding" in result["message"]
+
+    def test_vllm_success(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(
+            "eurpe.api.runtime_probe._tcp_probe",
+            lambda *_args, **_kwargs: True,
+        )
+
+        class FakeResponse:
+            status_code = 200
+
+        class FakeClient:
+            def __init__(self, timeout=None):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                pass
+
+            def post(self, url, json):
+                return FakeResponse()
+
+        monkeypatch.setattr("httpx.Client", lambda **kwargs: FakeClient())
+        result = check_local_model_generation("vllm", "meta-llama/Llama-3.1-8B-Instruct")
+        assert result["success"]
+
+
+class TestLocalEmbedding:
+    """Verify check_local_embedding handles various scenarios."""
+
+    def test_unknown_runtime(self) -> None:
+        result = check_local_embedding("nonexistent", "nomic-embed-text")
+        assert not result["success"]
+        assert "Unknown runtime" in result["message"]
+
+    def test_runtime_unreachable(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(
+            "eurpe.api.runtime_probe._tcp_probe",
+            lambda *_args, **_kwargs: False,
+        )
+        result = check_local_embedding("ollama", "nomic-embed-text")
+        assert not result["success"]
+        assert "not reachable" in result["message"]
+
+    def test_ollama_success(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(
+            "eurpe.api.runtime_probe._tcp_probe",
+            lambda *_args, **_kwargs: True,
+        )
+
+        class FakeResponse:
+            status_code = 200
+
+            def json(self):
+                return {"embedding": [0.1] * 768}
+
+        class FakeClient:
+            def __init__(self, timeout=None):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                pass
+
+            def post(self, url, json):
+                return FakeResponse()
+
+        monkeypatch.setattr("httpx.Client", lambda **kwargs: FakeClient())
+        result = check_local_embedding("ollama", "nomic-embed-text")
+        assert result["success"]
+        assert "768-dimension" in result["message"]
+
+    def test_ollama_malformed_response(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(
+            "eurpe.api.runtime_probe._tcp_probe",
+            lambda *_args, **_kwargs: True,
+        )
+
+        class FakeResponse:
+            status_code = 200
+
+            def json(self):
+                return {"no_embedding": True}
+
+        class FakeClient:
+            def __init__(self, timeout=None):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                pass
+
+            def post(self, url, json):
+                return FakeResponse()
+
+        monkeypatch.setattr("httpx.Client", lambda **kwargs: FakeClient())
+        result = check_local_embedding("ollama", "nomic-embed-text")
+        assert not result["success"]
+        assert "unexpected response" in result["message"]

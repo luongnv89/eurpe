@@ -315,3 +315,200 @@ def get_install_instructions(runtime: str) -> dict[str, str]:
     }
 
     return instructions.get(runtime, {"title": display_name, "steps": "", "docs_url": docs_url})
+
+
+# ---------------------------------------------------------------------------
+# Model generation test
+# ---------------------------------------------------------------------------
+
+#: Display name mapping used by the test functions.
+_RUNTIME_DISPLAY_NAMES: dict[str, str] = {
+    "ollama": "Ollama",
+    "mlx": "MLX (Apple Silicon)",
+    "vllm": "vLLM",
+}
+
+
+def check_local_model_generation(
+    runtime: str,
+    model: str,
+    base_url: str | None = None,
+) -> dict:
+    """Send a minimal generation request to verify a local model works.
+
+    Args:
+        runtime: One of ``"ollama"``, ``"vllm"``, ``"mlx"``.
+        model: Model identifier to test.
+        base_url: Override the default endpoint.
+
+    Returns:
+        A dict with ``success``, ``message``, and optional ``error_detail``.
+    """
+    info = RUNTIME_REGISTRY.get(runtime)
+    if info is None:
+        return {
+            "success": False,
+            "message": f"Unknown runtime: {runtime}",
+            "error_detail": f"Must be one of {sorted(RUNTIME_REGISTRY.keys())}",
+        }
+
+    url = (base_url or info["default_url"]).rstrip("/")
+    display_name = _RUNTIME_DISPLAY_NAMES.get(runtime, runtime)
+
+    # TCP probe first — fail fast if the server isn't running
+    parsed = urlparse(url)
+    host = parsed.hostname or "localhost"
+    port = parsed.port or 11434
+    if not _tcp_probe(host, port):
+        return {
+            "success": False,
+            "message": f"{display_name} is not reachable at {url}",
+            "error_detail": f"Start the {display_name} server and try again.",
+        }
+
+    try:
+        with httpx.Client(timeout=30.0) as client:
+            if runtime == "ollama":
+                resp = client.post(
+                    f"{url}/api/generate",
+                    json={"model": model, "prompt": "Hi", "stream": False, "keep_alive": 0},
+                )
+            else:
+                # MLX and vLLM use OpenAI-compatible /v1/chat/completions
+                resp = client.post(
+                    f"{url}/v1/chat/completions",
+                    json={
+                        "model": model,
+                        "messages": [{"role": "user", "content": "Hi"}],
+                        "max_tokens": 1,
+                    },
+                )
+
+            if resp.status_code == 200:
+                return {
+                    "success": True,
+                    "message": f"Model '{model}' is loaded and responding on {display_name}",
+                }
+
+            detail = resp.text[:500] if resp.text else f"HTTP {resp.status_code}"
+            return {
+                "success": False,
+                "message": f"Model '{model}' test failed on {display_name}",
+                "error_detail": detail,
+            }
+
+    except httpx.TimeoutException:
+        return {
+            "success": False,
+            "message": f"Model '{model}' timed out on {display_name}",
+            "error_detail": "The model may not be loaded or the server is overloaded.",
+        }
+    except httpx.HTTPError as exc:
+        return {
+            "success": False,
+            "message": f"Model '{model}' test failed on {display_name}",
+            "error_detail": str(exc),
+        }
+
+
+# ---------------------------------------------------------------------------
+# Embedding model test
+# ---------------------------------------------------------------------------
+
+
+def check_local_embedding(
+    runtime: str,
+    model: str,
+    base_url: str | None = None,
+) -> dict:
+    """Send a minimal embedding request to verify an embedding model works.
+
+    Args:
+        runtime: One of ``"ollama"``, ``"vllm"``, ``"mlx"``.
+        model: Embedding model identifier to test.
+        base_url: Override the default endpoint.
+
+    Returns:
+        A dict with ``success``, ``message``, and optional ``error_detail``.
+    """
+    info = RUNTIME_REGISTRY.get(runtime)
+    if info is None:
+        return {
+            "success": False,
+            "message": f"Unknown runtime: {runtime}",
+            "error_detail": f"Must be one of {sorted(RUNTIME_REGISTRY.keys())}",
+        }
+
+    url = (base_url or info["default_url"]).rstrip("/")
+    display_name = _RUNTIME_DISPLAY_NAMES.get(runtime, runtime)
+
+    # TCP probe first
+    parsed = urlparse(url)
+    host = parsed.hostname or "localhost"
+    port = parsed.port or 11434
+    if not _tcp_probe(host, port):
+        return {
+            "success": False,
+            "message": f"{display_name} is not reachable at {url}",
+            "error_detail": f"Start the {display_name} server and try again.",
+        }
+
+    try:
+        with httpx.Client(timeout=30.0) as client:
+            if runtime == "ollama":
+                resp = client.post(
+                    f"{url}/api/embeddings",
+                    json={"model": model, "prompt": "test"},
+                )
+            else:
+                # MLX and vLLM use OpenAI-compatible /v1/embeddings
+                resp = client.post(
+                    f"{url}/v1/embeddings",
+                    json={
+                        "model": model,
+                        "input": "test",
+                    },
+                )
+
+            if resp.status_code == 200:
+                payload = resp.json()
+                # Validate the response contains an embedding vector
+                if runtime == "ollama":
+                    embedding = payload.get("embedding")
+                else:
+                    data = payload.get("data", [])
+                    embedding = data[0].get("embedding") if data else None
+
+                if isinstance(embedding, list) and len(embedding) > 0:
+                    return {
+                        "success": True,
+                        "message": (
+                            f"Embedding model '{model}' is loaded and producing "
+                            f"{len(embedding)}-dimension vectors on {display_name}"
+                        ),
+                    }
+                return {
+                    "success": False,
+                    "message": f"Embedding model '{model}' returned unexpected response",
+                    "error_detail": "Response did not contain a valid embedding vector.",
+                }
+
+            detail = resp.text[:500] if resp.text else f"HTTP {resp.status_code}"
+            return {
+                "success": False,
+                "message": f"Embedding model '{model}' test failed on {display_name}",
+                "error_detail": detail,
+            }
+
+    except httpx.TimeoutException:
+        return {
+            "success": False,
+            "message": f"Embedding model '{model}' timed out on {display_name}",
+            "error_detail": "The model may not be loaded or the server is overloaded.",
+        }
+    except httpx.HTTPError as exc:
+        return {
+            "success": False,
+            "message": f"Embedding model '{model}' test failed on {display_name}",
+            "error_detail": str(exc),
+        }

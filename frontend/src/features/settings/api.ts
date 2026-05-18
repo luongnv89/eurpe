@@ -117,3 +117,51 @@ export async function testCloudProviderConnection(
   });
   return parseJsonOrThrow<CloudProviderTestResponse>(response);
 }
+
+// ---------------------------------------------------------------------------
+// Local model and embedding test (issue #81)
+// ---------------------------------------------------------------------------
+
+export interface LocalModelTestRequest {
+  runtime: string;
+  model: string;
+  base_url?: string | null;
+}
+
+export interface LocalEmbeddingTestRequest {
+  runtime: string;
+  model: string;
+  base_url?: string | null;
+}
+
+export interface LocalModelTestResponse {
+  success: boolean;
+  message: string;
+  error_detail: string | null;
+}
+
+export async function testLocalModel(
+  body: LocalModelTestRequest,
+  signal?: AbortSignal,
+): Promise<LocalModelTestResponse> {
+  const response = await fetch("/api/runtime/test-model", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    signal,
+  });
+  return parseJsonOrThrow<LocalModelTestResponse>(response);
+}
+
+export async function testLocalEmbedding(
+  body: LocalEmbeddingTestRequest,
+  signal?: AbortSignal,
+): Promise<LocalModelTestResponse> {
+  const response = await fetch("/api/runtime/test-embedding", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    signal,
+  });
+  return parseJsonOrThrow<LocalModelTestResponse>(response);
+}

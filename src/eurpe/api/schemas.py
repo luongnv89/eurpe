@@ -622,6 +622,72 @@ class RuntimeInstructionsResponse(BaseModel):
     )
 
 
+class LocalModelTestRequest(BaseModel):
+    """Request to test a local LLM model connection.
+
+    The client supplies the runtime key, model name, and optional base URL.
+    The server sends a minimal request (``max_tokens=1``) to verify the
+    model is loaded and can generate text.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    runtime: str = Field(
+        min_length=1,
+        description="Runtime key: ollama, mlx, or vllm.",
+    )
+    model: str = Field(
+        min_length=1,
+        description="Model identifier (e.g. llama3.1:8b).",
+    )
+    base_url: str | None = Field(
+        default=None,
+        description="Override the default runtime endpoint.",
+    )
+
+
+class LocalEmbeddingTestRequest(BaseModel):
+    """Request to test a local embedding model connection.
+
+    The client supplies the runtime key, embedding model name, and optional
+    base URL. The server sends a minimal text to verify the model can
+    produce embeddings.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    runtime: str = Field(
+        min_length=1,
+        description="Runtime key: ollama, mlx, or vllm.",
+    )
+    model: str = Field(
+        min_length=1,
+        description="Embedding model identifier (e.g. nomic-embed-text).",
+    )
+    base_url: str | None = Field(
+        default=None,
+        description="Override the default runtime endpoint.",
+    )
+
+
+class LocalModelTestResponse(BaseModel):
+    """Response from a local model or embedding test.
+
+    ``success`` indicates whether the model accepted the request and
+    produced output. ``message`` is a human-readable summary. On failure,
+    ``error_detail`` carries the error string for display in the UI.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    success: bool = Field(description="True when the test passed.")
+    message: str = Field(description="Human-readable summary of the result.")
+    error_detail: str | None = Field(
+        default=None,
+        description="Error detail shown on failure.",
+    )
+
+
 # ---------------------------------------------------------------------------
 # Cloud provider connection test (issue #80)
 # ---------------------------------------------------------------------------

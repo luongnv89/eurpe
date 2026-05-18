@@ -10,6 +10,14 @@ Three endpoints back the Settings page runtime detection:
 * ``GET /api/runtime/instructions/{runtime}`` — step-by-step
   installation instructions for a specific runtime.
 
+Issue #81: two additional endpoints for testing local models and
+embeddings:
+
+* ``POST /api/runtime/test-model`` — send a minimal generation request
+  to verify a local LLM model is loaded and responding.
+* ``POST /api/runtime/test-embedding`` — send a minimal embedding
+  request to verify an embedding model can produce vectors.
+
 Error mapping
 -------------
 * Unknown runtime key → ``400 Bad Request``.
@@ -25,11 +33,16 @@ from fastapi import APIRouter, HTTPException, status
 
 from eurpe.api.runtime_probe import (
     RUNTIME_REGISTRY,
+    check_local_embedding,
+    check_local_model_generation,
     get_install_instructions,
     probe_runtime,
 )
 from eurpe.api.schemas import (
     AllRuntimesResponse,
+    LocalEmbeddingTestRequest,
+    LocalModelTestRequest,
+    LocalModelTestResponse,
     RuntimeInstructionsResponse,
     RuntimeStatusResponse,
 )
@@ -129,4 +142,79 @@ def get_runtime_instructions(runtime: str) -> RuntimeInstructionsResponse:
     instructions = get_install_instructions(runtime)
     return RuntimeInstructionsResponse(
         instructions=instructions,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Local model and embedding test (issue #81)
+# ---------------------------------------------------------------------------
+
+
+@router.post("/test-model", response_model=LocalModelTestResponse)
+def test_model(body: LocalModelTestRequest) -> LocalModelTestResponse:
+    """Test a local LLM model with a minimal generation request.
+
+    Sends a trivial prompt to verify the selected model is loaded and
+    can produce output. Returns success/failure with error details on
+    failure.
+
+    Error mapping
+    -------------
+    * Unknown runtime → ``400 Bad Request``.
+    * Runtime unreachable → ``200`` with ``success=false``.
+    * Model not loaded / generation error → ``200`` with ``success=false``.
+    """
+    if body.runtime not in RUNTIME_REGISTRY:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"Unsupported runtime: {body.runtime!r}. "
+                f"Must be one of {sorted(RUNTIME_REGISTRY.keys())}."
+            ),
+        )
+
+    result = check_local_model_generation(
+        runtime=body.runtime,
+        model=body.model,
+        base_url=body.base_url,
+    )
+    return LocalModelTestResponse(
+        success=result["success"],
+        message=result["message"],
+        error_detail=result.get("error_detail"),
+    )
+
+
+@router.post("/test-embedding", response_model=LocalModelTestResponse)
+def test_embedding(body: LocalEmbeddingTestRequest) -> LocalModelTestResponse:
+    """Test a local embedding model with a minimal embedding request.
+
+    Sends a trivial text to verify the embedding model is loaded and
+    can produce vectors. Returns success/failure with error details on
+    failure.
+
+    Error mapping
+    -------------
+    * Unknown runtime → ``400 Bad Request``.
+    * Runtime unreachable → ``200`` with ``success=false``.
+    * Model not loaded / embedding error → ``200`` with ``success=false``.
+    """
+    if body.runtime not in RUNTIME_REGISTRY:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"Unsupported runtime: {body.runtime!r}. "
+                f"Must be one of {sorted(RUNTIME_REGISTRY.keys())}."
+            ),
+        )
+
+    result = check_local_embedding(
+        runtime=body.runtime,
+        model=body.model,
+        base_url=body.base_url,
+    )
+    return LocalModelTestResponse(
+        success=result["success"],
+        message=result["message"],
+        error_detail=result.get("error_detail"),
     )

@@ -25,9 +25,12 @@ import {
   fetchAllRuntimes,
   fetchRuntimeInstructions,
   testCloudProviderConnection,
+  testLocalModel,
+  testLocalEmbedding,
   type AllRuntimesResponse,
   type CloudProviderTestResponse,
   type InstallInstructions,
+  type LocalModelTestResponse,
   type RuntimeStatus,
 } from "./api";
 
@@ -350,6 +353,56 @@ function RuntimeCard({
   isExpanded: boolean;
   onToggle: () => void;
 }) {
+  const [testingModel, setTestingModel] = useState(false);
+  const [testingEmbedding, setTestingEmbedding] = useState(false);
+  const [modelResult, setModelResult] = useState<LocalModelTestResponse | null>(null);
+  const [embeddingResult, setEmbeddingResult] = useState<LocalModelTestResponse | null>(null);
+  const [selectedModel, setSelectedModel] = useState(status.models[0] ?? "");
+
+  const handleTestModel = async (model: string) => {
+    if (!model) return;
+    setTestingModel(true);
+    setModelResult(null);
+    try {
+      const resp = await testLocalModel({
+        runtime: status.runtime,
+        model,
+        base_url: status.endpoint,
+      });
+      setModelResult(resp);
+    } catch (err) {
+      setModelResult({
+        success: false,
+        message: "Request failed",
+        error_detail: err instanceof Error ? err.message : "Unknown error",
+      });
+    } finally {
+      setTestingModel(false);
+    }
+  };
+
+  const handleTestEmbedding = async (model: string) => {
+    if (!model) return;
+    setTestingEmbedding(true);
+    setEmbeddingResult(null);
+    try {
+      const resp = await testLocalEmbedding({
+        runtime: status.runtime,
+        model,
+        base_url: status.endpoint,
+      });
+      setEmbeddingResult(resp);
+    } catch (err) {
+      setEmbeddingResult({
+        success: false,
+        message: "Request failed",
+        error_detail: err instanceof Error ? err.message : "Unknown error",
+      });
+    } finally {
+      setTestingEmbedding(false);
+    }
+  };
+
   return (
     <Card
       className={[
@@ -393,7 +446,7 @@ function RuntimeCard({
       </CardHeader>
       <CardContent>
         {status.available ? (
-          <div>
+          <div className="space-y-4">
             {status.models.length > 0 ? (
               <div>
                 <p className="mb-2 text-xs font-medium text-brand-navy/65">
@@ -414,6 +467,83 @@ function RuntimeCard({
                 Runtime is running but no models are installed.
               </p>
             )}
+
+            {/* Test Model and Test Embedding buttons (issue #81) */}
+            <div className="flex flex-wrap gap-2 pt-2">
+              <div className="flex-1 min-w-[200px]">
+                <label className="mb-1 block text-xs font-medium text-brand-navy/65">
+                  Model to test
+                </label>
+                <div className="flex gap-2">
+                  <select
+                    value={selectedModel}
+                    onChange={(e) => setSelectedModel(e.target.value)}
+                    className="flex-1 rounded-md border border-brand-navy/15 bg-white px-3 py-1.5 text-xs text-brand-navy focus:border-brand-amber focus:outline-none focus:ring-1 focus:ring-brand-amber"
+                  >
+                    {status.models.map((m) => (
+                      <option key={m} value={m}>
+                        {m}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => handleTestModel(selectedModel)}
+                    disabled={testingModel || !selectedModel}
+                    className="inline-flex items-center gap-1 rounded-md bg-brand-amber px-3 py-1.5 text-xs font-medium text-brand-navy shadow-amber transition-colors hover:bg-brand-amber-600 hover:text-white disabled:pointer-events-none disabled:opacity-50"
+                  >
+                    {testingModel ? (
+                      <>
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                        Testing…
+                      </>
+                    ) : (
+                      "Test Model"
+                    )}
+                  </button>
+                </div>
+                {modelResult && (
+                  <TestResultDisplay result={modelResult} />
+                )}
+              </div>
+
+              <div className="flex-1 min-w-[200px]">
+                <label className="mb-1 block text-xs font-medium text-brand-navy/65">
+                  Embedding model
+                </label>
+                <div className="flex gap-2">
+                  <select
+                    value={selectedModel}
+                    onChange={(e) => setSelectedModel(e.target.value)}
+                    className="flex-1 rounded-md border border-brand-navy/15 bg-white px-3 py-1.5 text-xs text-brand-navy focus:border-brand-amber focus:outline-none focus:ring-1 focus:ring-brand-amber"
+                  >
+                    {status.models.map((m) => (
+                      <option key={m} value={m}>
+                        {m}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => handleTestEmbedding(selectedModel)}
+                    disabled={testingEmbedding || !selectedModel}
+                    className="inline-flex items-center gap-1 rounded-md bg-brand-amber px-3 py-1.5 text-xs font-medium text-brand-navy shadow-amber transition-colors hover:bg-brand-amber-600 hover:text-white disabled:pointer-events-none disabled:opacity-50"
+                  >
+                    {testingEmbedding ? (
+                      <>
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                        Testing…
+                      </>
+                    ) : (
+                      "Test Embedding"
+                    )}
+                  </button>
+                </div>
+                {embeddingResult && (
+                  <TestResultDisplay result={embeddingResult} />
+                )}
+              </div>
+            </div>
           </div>
         ) : (
           <div>
@@ -638,6 +768,39 @@ function CloudProviderTestCard() {
           </div>
         </CardContent>
       </Card>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// TestResultDisplay — shared result display for local model/embedding tests
+// ---------------------------------------------------------------------------
+
+function TestResultDisplay({ result }: { result: LocalModelTestResponse }) {
+  return (
+    <div
+      className={[
+        "mt-2 flex items-start gap-1.5 rounded-md border p-2 text-xs",
+        result.success
+          ? "border-green-200 bg-green-50 text-green-800"
+          : "border-red-200 bg-red-50 text-red-800",
+      ].join(" ")}
+      role="status"
+      aria-live="polite"
+    >
+      {result.success ? (
+        <CheckCircle2 className="mt-0.5 h-3 w-3 shrink-0" />
+      ) : (
+        <AlertCircle className="mt-0.5 h-3 w-3 shrink-0" />
+      )}
+      <div>
+        <p className="font-medium">{result.message}</p>
+        {result.error_detail && (
+          <p className="mt-0.5 font-mono text-[10px] opacity-80">
+            {result.error_detail}
+          </p>
+        )}
+      </div>
     </div>
   );
 }
