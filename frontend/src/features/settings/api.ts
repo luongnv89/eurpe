@@ -87,3 +87,33 @@ export async function fetchRuntimeInstructions(
   const response = await fetch(`/api/runtime/instructions/${runtime}`, { signal });
   return parseJsonOrThrow<RuntimeInstructionsResponse>(response);
 }
+
+// ---------------------------------------------------------------------------
+// Cloud provider connection test (issue #80)
+// ---------------------------------------------------------------------------
+
+export interface CloudProviderTestRequest {
+  provider: string;
+  model: string;
+  api_key: string;
+}
+
+export interface CloudProviderTestResponse {
+  success: boolean;
+  message: string;
+  model_confirmed: string | null;
+  error_detail: string | null;
+}
+
+export async function testCloudProviderConnection(
+  body: CloudProviderTestRequest,
+  signal?: AbortSignal,
+): Promise<CloudProviderTestResponse> {
+  const response = await fetch("/api/cloud/test", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    signal,
+  });
+  return parseJsonOrThrow<CloudProviderTestResponse>(response);
+}

@@ -37,6 +37,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from eurpe import __version__
+from eurpe.api.routes import cloud_test as cloud_test_routes
 from eurpe.api.routes import generate as generate_routes
 from eurpe.api.routes import ingest as ingest_routes
 from eurpe.api.routes import runtime as runtime_routes
@@ -75,6 +76,7 @@ app = FastAPI(
 app.include_router(ingest_routes.router)
 app.include_router(generate_routes.router)
 app.include_router(runtime_routes.router)
+app.include_router(cloud_test_routes.router)
 
 
 @app.get("/health")

@@ -2,9 +2,13 @@ import { useEffect, useState } from "react";
 import {
   AlertCircle,
   CheckCircle2,
+  Cloud,
   Cpu,
   Database,
+  Eye,
+  EyeOff,
   FolderTree,
+  Loader2,
   RefreshCw,
   Sparkles,
 } from "lucide-react";
@@ -20,7 +24,9 @@ import { WorkspaceHeader } from "@/components/WorkspaceHeader";
 import {
   fetchAllRuntimes,
   fetchRuntimeInstructions,
+  testCloudProviderConnection,
   type AllRuntimesResponse,
+  type CloudProviderTestResponse,
   type InstallInstructions,
   type RuntimeStatus,
 } from "./api";
@@ -63,6 +69,14 @@ const INDEX_SETTINGS: SettingItem[] = [
     value: "./data/index",
     hint: "Delete the folder to reset the corpus.",
   },
+];
+
+const CLOUD_PROVIDERS = [
+  { key: "openai", label: "OpenAI", defaultModel: "gpt-4o" },
+  { key: "anthropic", label: "Anthropic", defaultModel: "claude-sonnet-4-20250514" },
+  { key: "gemini", label: "Gemini", defaultModel: "gemini-2.5-flash" },
+  { key: "openrouter", label: "OpenRouter", defaultModel: "openai/gpt-4o" },
+  { key: "groq", label: "Groq", defaultModel: "llama-3.3-70b-versatile" },
 ];
 
 // TODO(#83): Re-enable Network & Security card when outbound features
@@ -281,6 +295,9 @@ export function SettingsPage() {
           </ul>
         </div>
 
+        {/* Cloud Provider Connection Test (issue #80) */}
+        <CloudProviderTestCard />
+
         <Card className="border-brand-amber/40 bg-brand-amber/[0.08] shadow-editorial">
           <CardHeader>
             <CardTitle className="font-display text-brand-navy">
@@ -434,5 +451,193 @@ function RuntimeCard({
         )}
       </CardContent>
     </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// CloudProviderTestCard — test cloud provider connections (issue #80)
+// ---------------------------------------------------------------------------
+
+function CloudProviderTestCard() {
+  const [provider, setProvider] = useState(CLOUD_PROVIDERS[0].key);
+  const [model, setModel] = useState(CLOUD_PROVIDERS[0].defaultModel);
+  const [apiKey, setApiKey] = useState("");
+  const [showKey, setShowKey] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [result, setResult] = useState<CloudProviderTestResponse | null>(null);
+
+  const selectedProvider = CLOUD_PROVIDERS.find((p) => p.key === provider)!;
+
+  const handleProviderChange = (newProvider: string) => {
+    setProvider(newProvider);
+    const p = CLOUD_PROVIDERS.find((cp) => cp.key === newProvider)!;
+    setModel(p.defaultModel);
+    setResult(null);
+  };
+
+  const handleTest = async () => {
+    if (!apiKey.trim()) return;
+    setTesting(true);
+    setResult(null);
+    try {
+      const resp = await testCloudProviderConnection({
+        provider,
+        model,
+        api_key: apiKey,
+      });
+      setResult(resp);
+    } catch (err) {
+      setResult({
+        success: false,
+        message: "Request failed",
+        model_confirmed: null,
+        error_detail: err instanceof Error ? err.message : "Unknown error",
+      });
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  const canTest = apiKey.trim().length > 0 && !testing;
+
+  return (
+    <div>
+      <h3 className="mb-3 font-display text-sm font-medium uppercase tracking-[0.12em] text-brand-navy/55">
+        Cloud provider
+      </h3>
+      <Card className="border-brand-navy/10 shadow-editorial">
+        <CardHeader className="pb-2">
+          <CardTitle className="flex items-center gap-2 text-sm font-medium text-brand-navy/65">
+            <span
+              aria-hidden="true"
+              className="inline-flex h-7 w-7 items-center justify-center rounded bg-brand-parchment text-brand-navy ring-1 ring-brand-navy/10"
+            >
+              <Cloud className="h-3.5 w-3.5" aria-hidden="true" />
+            </span>
+            Test connection
+          </CardTitle>
+          <CardDescription className="text-xs text-brand-navy/50">
+            Verify your API key works with the selected provider and model.
+            Uses a minimal request (1 token) to avoid unnecessary charges.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="space-y-4">
+            {/* Provider select */}
+            <div>
+              <label className="mb-1 block text-xs font-medium text-brand-navy/65">
+                Provider
+              </label>
+              <select
+                value={provider}
+                onChange={(e) => handleProviderChange(e.target.value)}
+                className="w-full rounded-md border border-brand-navy/15 bg-white px-3 py-2 text-sm text-brand-navy focus:border-brand-amber focus:outline-none focus:ring-1 focus:ring-brand-amber"
+              >
+                {CLOUD_PROVIDERS.map((p) => (
+                  <option key={p.key} value={p.key}>
+                    {p.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Model input */}
+            <div>
+              <label className="mb-1 block text-xs font-medium text-brand-navy/65">
+                Model
+              </label>
+              <input
+                type="text"
+                value={model}
+                onChange={(e) => setModel(e.target.value)}
+                placeholder="e.g. gpt-4o"
+                className="w-full rounded-md border border-brand-navy/15 bg-white px-3 py-2 text-sm text-brand-navy placeholder:text-brand-navy/30 focus:border-brand-amber focus:outline-none focus:ring-1 focus:ring-brand-amber"
+              />
+            </div>
+
+            {/* API key input */}
+            <div>
+              <label className="mb-1 block text-xs font-medium text-brand-navy/65">
+                API key
+              </label>
+              <div className="relative">
+                <input
+                  type={showKey ? "text" : "password"}
+                  value={apiKey}
+                  onChange={(e) => {
+                    setApiKey(e.target.value);
+                    setResult(null);
+                  }}
+                  placeholder={`Enter your ${selectedProvider.label} API key`}
+                  className="w-full rounded-md border border-brand-navy/15 bg-white px-3 py-2 pr-10 text-sm text-brand-navy placeholder:text-brand-navy/30 focus:border-brand-amber focus:outline-none focus:ring-1 focus:ring-brand-amber"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowKey((s) => !s)}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-brand-navy/40 hover:text-brand-navy"
+                  aria-label={showKey ? "Hide API key" : "Show API key"}
+                >
+                  {showKey ? (
+                    <EyeOff className="h-4 w-4" />
+                  ) : (
+                    <Eye className="h-4 w-4" />
+                  )}
+                </button>
+              </div>
+            </div>
+
+            {/* Test button */}
+            <button
+              type="button"
+              onClick={handleTest}
+              disabled={!canTest}
+              className="inline-flex items-center justify-center gap-2 rounded-md bg-brand-amber px-4 py-2 text-sm font-medium text-brand-navy shadow-amber transition-colors hover:bg-brand-amber-600 hover:text-white disabled:pointer-events-none disabled:opacity-50"
+            >
+              {testing ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Testing…
+                </>
+              ) : (
+                "Test Connection"
+              )}
+            </button>
+
+            {/* Result message */}
+            {result && (
+              <div
+                className={[
+                  "flex items-start gap-2 rounded-md border p-3 text-sm",
+                  result.success
+                    ? "border-green-200 bg-green-50 text-green-800"
+                    : "border-red-200 bg-red-50 text-red-800",
+                ].join(" ")}
+                role="status"
+                aria-live="polite"
+              >
+                {result.success ? (
+                  <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
+                ) : (
+                  <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                )}
+                <div>
+                  <p className="font-medium">{result.message}</p>
+                  {result.model_confirmed && (
+                    <p className="mt-1 text-xs opacity-80">
+                      Model: {result.model_confirmed}
+                    </p>
+                  )}
+                  {result.error_detail && (
+                    <p className="mt-1 font-mono text-xs opacity-80">
+                      {result.error_detail}
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+    </div>
   );
 }
