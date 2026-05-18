@@ -620,3 +620,54 @@ class RuntimeInstructionsResponse(BaseModel):
     instructions: RuntimeInstallInstructions = Field(
         description="Installation instructions for the requested runtime."
     )
+
+
+# ---------------------------------------------------------------------------
+# Cloud provider connection test (issue #80)
+# ---------------------------------------------------------------------------
+
+
+class CloudProviderTestRequest(BaseModel):
+    """Request to test a cloud LLM provider connection.
+
+    The client supplies the provider name, model identifier, and API key.
+    The server sends a minimal request (``max_tokens=1``) to verify the
+    key is valid and the model is accessible.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    provider: str = Field(
+        min_length=1,
+        description=("Provider name: openai, anthropic, gemini, openrouter, or groq."),
+    )
+    model: str = Field(
+        min_length=1,
+        description="Model identifier (e.g. gpt-4o, claude-sonnet-4-20250514).",
+    )
+    api_key: str = Field(
+        min_length=1,
+        description="API key to validate.",
+    )
+
+
+class CloudProviderTestResponse(BaseModel):
+    """Response from a cloud provider connection test.
+
+    ``success`` indicates whether the provider accepted the key and model.
+    ``message`` is a human-readable summary. On failure, ``error_detail``
+    carries the provider's error string for display in the UI.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    success: bool = Field(description="True when the connection test passed.")
+    message: str = Field(description="Human-readable summary of the result.")
+    model_confirmed: str | None = Field(
+        default=None,
+        description="Model identifier confirmed by the provider, when available.",
+    )
+    error_detail: str | None = Field(
+        default=None,
+        description="Provider error detail shown on failure.",
+    )
