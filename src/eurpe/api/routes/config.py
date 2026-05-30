@@ -16,6 +16,7 @@ The YAML file is the source of truth; edits made directly to
 from __future__ import annotations
 
 import logging
+import shutil
 
 import yaml
 from fastapi import APIRouter, Depends, HTTPException
@@ -88,7 +89,8 @@ def update_config_endpoint(body: ConfigUpdateRequest) -> ConfigUpdateResponse:
                 status_code=500,
                 detail="No configuration file exists and no example template is available.",
             )
-        EXAMPLE_CONFIG_PATH.copy(config_path)
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(EXAMPLE_CONFIG_PATH, config_path)
 
     with config_path.open("r", encoding="utf-8") as fh:
         raw: dict = yaml.safe_load(fh) or {}
@@ -112,17 +114,18 @@ def update_config_endpoint(body: ConfigUpdateRequest) -> ConfigUpdateResponse:
     if body.models is not None:
         models_patch: dict[str, object] = {}
         m: ModelsConfigUpdate = body.models
-        if m.runtime is not None:
+        model_fields = m.model_fields_set
+        if "runtime" in model_fields and m.runtime is not None:
             models_patch["runtime"] = m.runtime
-        if m.llm_model is not None:
+        if "llm_model" in model_fields and m.llm_model is not None:
             models_patch["llm_model"] = m.llm_model
-        if m.embedding_model is not None:
+        if "embedding_model" in model_fields and m.embedding_model is not None:
             models_patch["embedding_model"] = m.embedding_model
-        if m.ollama_base_url is not None:
+        if "ollama_base_url" in model_fields and m.ollama_base_url is not None:
             models_patch["ollama_base_url"] = m.ollama_base_url
-        if m.llm_base_url is not None:
+        if "llm_base_url" in model_fields:
             models_patch["llm_base_url"] = m.llm_base_url
-        if m.llm_api_key_env is not None:
+        if "llm_api_key_env" in model_fields:
             models_patch["llm_api_key_env"] = m.llm_api_key_env
         if models_patch:
             existing_models: dict = raw.get("models", {}) or {}

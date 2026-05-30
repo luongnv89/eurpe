@@ -131,6 +131,43 @@ class TestUpdateConfig:
         assert cfg["index_path"] == "/tmp/new-index"
         assert cfg["runtime_dir"] == "/tmp/new-runtime"
 
+    def test_update_can_clear_nullable_model_fields(self, configured_app: TestClient) -> None:
+        configured_app.put(
+            "/api/config",
+            json={
+                "models": {
+                    "llm_base_url": "http://localhost:9999/v1",
+                    "llm_api_key_env": "EURPE_TEST_KEY",  # pragma: allowlist secret
+                }
+            },
+        )
+
+        resp = configured_app.put(
+            "/api/config",
+            json={"models": {"llm_base_url": None, "llm_api_key_env": None}},
+        )
+
+        assert resp.status_code == 200
+        models = resp.json()["config"]["models"]
+        assert models["llm_base_url"] is None
+        assert models["llm_api_key_env"] is None
+        raw = yaml.safe_load(deps._CONFIG_PATH.read_text(encoding="utf-8"))
+        assert raw["models"]["llm_base_url"] is None
+        assert raw["models"]["llm_api_key_env"] is None
+
+    def test_update_bootstraps_missing_config_from_example(self, tmp_path: Path) -> None:
+        cfg_path = tmp_path / "nested" / "config.yaml"
+        deps.set_config_path(cfg_path)
+        try:
+            with TestClient(app) as client:
+                resp = client.put("/api/config", json={"log_level": "DEBUG"})
+        finally:
+            deps.reset_dependency_caches()
+
+        assert resp.status_code == 200
+        assert cfg_path.exists()
+        assert resp.json()["config"]["log_level"] == "DEBUG"
+
     def test_update_rejects_empty_body(self, configured_app: TestClient) -> None:
         resp = configured_app.put("/api/config", json={})
         assert resp.status_code == 400
