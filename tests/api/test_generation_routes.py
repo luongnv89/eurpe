@@ -128,7 +128,7 @@ class _StubService:
             record = IterationRecord(
                 iteration_index=new_index,
                 changes_summary=(
-                    f"Iteration {new_index} expanded the draft. " "text +50 chars, citations +0."
+                    f"Iteration {new_index} expanded the draft. text +50 chars, citations +0."
                 ),
                 requirements_checked=[
                     "default-section-guidance",

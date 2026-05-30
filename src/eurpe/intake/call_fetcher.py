@@ -155,12 +155,12 @@ def extract_topic_id(url: str) -> str:
         raise InvalidPortalURLError(f"could not parse URL: {exc}") from exc
 
     if parsed.scheme not in {"http", "https"}:
-        raise InvalidPortalURLError("URL must use http or https; " f"got scheme {parsed.scheme!r}")
+        raise InvalidPortalURLError(f"URL must use http or https; got scheme {parsed.scheme!r}")
     if not parsed.hostname:
         raise InvalidPortalURLError("URL is missing a host")
     if parsed.hostname not in _ACCEPTED_HOSTS:
         raise InvalidPortalURLError(
-            "URL must point to ec.europa.eu or commission.europa.eu; " f"got {parsed.hostname!r}"
+            f"URL must point to ec.europa.eu or commission.europa.eu; got {parsed.hostname!r}"
         )
 
     # Match against the path only — query strings and fragments often

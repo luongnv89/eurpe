@@ -129,10 +129,7 @@ def _build_changes_summary(prior: GenerationDraft, refined: GenerationDraft) -> 
 
     sign_char = "+" if char_delta >= 0 else ""
     sign_cite = "+" if citation_delta >= 0 else ""
-    return (
-        f"{narrative} "
-        f"text {sign_char}{char_delta} chars, citations {sign_cite}{citation_delta}."
-    )
+    return f"{narrative} text {sign_char}{char_delta} chars, citations {sign_cite}{citation_delta}."
 
 
 def _augment_request_with_critique(
