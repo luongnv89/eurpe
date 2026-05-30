@@ -307,6 +307,43 @@ def test_generate_section_maps_llm_unavailable_to_503(
     assert "LLM unavailable" in response.text
 
 
+def test_generate_section_maps_dependency_llm_unavailable_to_503(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """LLM setup errors from FastAPI dependencies use the same 503 envelope."""
+
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setattr(
+        "eurpe.retrieval.embeddings._ollama_reachable",
+        lambda *_args, **_kwargs: False,
+    )
+    cfg_path = write_offline_config(
+        tmp_path,
+        models={
+            "runtime": "openai",
+            "llm_model": "gpt-4o-mini",
+            "embedding_model": "nomic-embed-text",
+            "ollama_base_url": "http://localhost:1",
+        },
+    )
+    deps.set_config_path(cfg_path)
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/generation/section",
+                json={
+                    "section_type": SectionType.METHODOLOGY.value,
+                    "user_intent": "describe something",
+                },
+            )
+    finally:
+        deps.reset_dependency_caches()
+
+    assert response.status_code == 503, response.text
+    assert "OPENAI_API_KEY" in response.text
+
+
 def test_generate_section_maps_generation_error_to_500(
     configured_app: TestClient,
 ) -> None:

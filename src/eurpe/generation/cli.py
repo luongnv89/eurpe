@@ -434,7 +434,18 @@ def section(
     # runs ``eurpe analytics export``.
     analytics = make_analytics_logger(cfg)
 
-    llm = make_llm_client(cfg)
+    try:
+        llm = make_llm_client(cfg)
+    except LLMUnavailableError as exc:
+        typer.echo(f"error: LLM unavailable: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    except GenerationError as exc:
+        typer.echo(f"error: generation setup failed: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    except SecurityError as exc:
+        typer.echo(f"error: network policy denied generation setup: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
     workflow = SectionGenerationWorkflow(retriever=retriever, llm=llm, analytics=analytics)
     # The critic loop reuses the same LLM client for critique by default.
     # See ``GenerationService`` for the rationale; the CLI mirrors that
