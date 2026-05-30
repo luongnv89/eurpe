@@ -77,6 +77,7 @@ from eurpe.retrieval import (
     make_embedder,
 )
 from eurpe.schema import Programme, SectionType
+from eurpe.security import SecurityError
 
 # A sub-Typer so the CLI surface is ``eurpe generate section``. Wired
 # into the top-level app in :mod:`eurpe.cli`.
@@ -511,6 +512,9 @@ def section(
     except GenerationError as exc:
         typer.echo(f"error: generation failed: {exc}", err=True)
         raise typer.Exit(code=1) from exc
+    except SecurityError as exc:
+        typer.echo(f"error: network policy denied generation: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
 
     # Critic loop (Task 3.2 / issue #16). When --iterations > 1, run
     # the loop synchronously up to the cap. Ctrl+C between iterations
@@ -539,6 +543,9 @@ def section(
                 raise typer.Exit(code=1) from exc
             except GenerationError as exc:
                 typer.echo(f"error: iteration failed: {exc}", err=True)
+                raise typer.Exit(code=1) from exc
+            except SecurityError as exc:
+                typer.echo(f"error: network policy denied iteration: {exc}", err=True)
                 raise typer.Exit(code=1) from exc
             draft = result.draft
             if result.stopped:

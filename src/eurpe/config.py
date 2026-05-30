@@ -37,8 +37,8 @@ class ModelsConfig(BaseModel):
     runtime: str = Field(
         default="ollama",
         description=(
-            "ollama | mlx | openai | openrouter | groq | lmstudio | vllm | "
-            "llamacpp | anthropic | gemini"
+            "ollama | openai | openrouter | groq | lmstudio | vllm | llamacpp | "
+            "anthropic | gemini"
         ),
     )
     llm_model: str = Field(default="llama3.1:8b")
@@ -66,7 +66,6 @@ class ModelsConfig(BaseModel):
         normalised = aliases.get(normalised, normalised)
         allowed = {
             "ollama",
-            "mlx",
             "openai",
             "openrouter",
             "groq",

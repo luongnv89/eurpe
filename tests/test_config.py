@@ -49,7 +49,6 @@ def test_example_config_loads_into_typed_model() -> None:
     assert config.offline_mode is True
     assert config.models.runtime in {
         "ollama",
-        "mlx",
         "openai",
         "openrouter",
         "groq",
@@ -66,7 +65,6 @@ def test_example_config_loads_into_typed_model() -> None:
     "runtime",
     [
         "ollama",
-        "mlx",
         "openai",
         "openrouter",
         "groq",
@@ -96,7 +94,6 @@ def test_supported_llm_runtimes_load(tmp_path: Path, runtime: str) -> None:
     config = load_config(cfg)
     assert config.models.runtime in {
         "ollama",
-        "mlx",
         "openai",
         "openrouter",
         "groq",

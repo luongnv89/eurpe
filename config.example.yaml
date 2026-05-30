@@ -17,7 +17,7 @@ runtime_dir: ./data/runtime
 # providers require an env-var API key and an explicit network_allowlist
 # entry for the provider host:443 before a request can leave the machine.
 models:
-  runtime: ollama        # ollama | mlx | openai | openrouter | groq | lmstudio | vllm | llamacpp | anthropic | gemini
+  runtime: ollama        # ollama | openai | openrouter | groq | lmstudio | vllm | llamacpp | anthropic | gemini
   llm_model: llama3.1:8b
   embedding_model: nomic-embed-text
   ollama_base_url: http://localhost:11434

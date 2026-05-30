@@ -25,6 +25,8 @@ Error mapping
 * ``GenerationError`` (hallucinated marker, retriever returned nothing
   workable) → ``500 Internal Server Error``. The detail string is the
   exception message so an operator gets the actual reason in the UI.
+* ``SecurityError`` (network policy denied egress) → ``403 Forbidden``
+  before any prompt leaves the machine.
 * ``FileNotFoundError`` / ``ValueError`` (profile lookup) → ``400 Bad
   Request``. The operator chose a profile that the server cannot load.
 * Pydantic validation failures bubble up as the default 422 with the
@@ -78,6 +80,7 @@ from eurpe.intake.call_fetcher import (
     fetch_call_context,
 )
 from eurpe.schema import Programme, SectionType
+from eurpe.security import SecurityError
 
 logger = logging.getLogger(__name__)
 
@@ -179,6 +182,11 @@ def generate_section(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"generation failed: {exc}",
+        ) from exc
+    except SecurityError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"network policy denied generation: {exc}",
         ) from exc
     except (FileNotFoundError, ValueError) as exc:
         # Both come from :func:`load_profile` when the requested
@@ -343,6 +351,11 @@ def iterate_section(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"iteration failed: {exc}",
+        ) from exc
+    except SecurityError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"network policy denied generation: {exc}",
         ) from exc
     except (FileNotFoundError, ValueError) as exc:
         raise HTTPException(
