@@ -37,8 +37,7 @@ class ModelsConfig(BaseModel):
     runtime: str = Field(
         default="ollama",
         description=(
-            "ollama | openai | openrouter | groq | lmstudio | vllm | llamacpp | "
-            "anthropic | gemini"
+            "ollama | openai | openrouter | groq | lmstudio | vllm | llamacpp | anthropic | gemini"
         ),
     )
     llm_model: str = Field(default="llama3.1:8b")
