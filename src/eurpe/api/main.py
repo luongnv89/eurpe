@@ -34,13 +34,17 @@ import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, status
+from fastapi.responses import JSONResponse
 
 from eurpe import __version__
 from eurpe.api.routes import cloud_test as cloud_test_routes
+from eurpe.api.routes import config as config_routes
 from eurpe.api.routes import generate as generate_routes
 from eurpe.api.routes import ingest as ingest_routes
 from eurpe.api.routes import runtime as runtime_routes
+from eurpe.generation import GenerationError, LLMUnavailableError
+from eurpe.security import SecurityError
 
 logger = logging.getLogger(__name__)
 
@@ -71,12 +75,53 @@ app = FastAPI(
     lifespan=_lifespan,
 )
 
+
+@app.exception_handler(LLMUnavailableError)
+async def _llm_unavailable_handler(
+    _request: Request,
+    exc: LLMUnavailableError,
+) -> JSONResponse:
+    """Map LLM setup/runtime unavailability even when raised by dependencies."""
+
+    return JSONResponse(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        content={"detail": f"LLM unavailable: {exc}"},
+    )
+
+
+@app.exception_handler(SecurityError)
+async def _security_error_handler(
+    _request: Request,
+    exc: SecurityError,
+) -> JSONResponse:
+    """Map network-policy denials raised before a route handler starts."""
+
+    return JSONResponse(
+        status_code=status.HTTP_403_FORBIDDEN,
+        content={"detail": f"network policy denied generation: {exc}"},
+    )
+
+
+@app.exception_handler(GenerationError)
+async def _generation_error_handler(
+    _request: Request,
+    exc: GenerationError,
+) -> JSONResponse:
+    """Map generation failures that escape route-local handlers."""
+
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content={"detail": f"generation failed: {exc}"},
+    )
+
+
 # Register feature routers. Each router carries its own ``prefix`` so the
 # top-level app stays free of route-by-route URL knowledge.
 app.include_router(ingest_routes.router)
 app.include_router(generate_routes.router)
 app.include_router(runtime_routes.router)
 app.include_router(cloud_test_routes.router)
+app.include_router(config_routes.router)
 
 
 @app.get("/health")

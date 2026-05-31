@@ -26,6 +26,8 @@ REQUIRED_MODEL_KEYS = {
     "llm_model",
     "embedding_model",
     "ollama_base_url",
+    "llm_base_url",
+    "llm_api_key_env",
 }
 
 
@@ -45,8 +47,62 @@ def test_example_config_loads_into_typed_model() -> None:
     assert isinstance(config, EurpeConfig)
     # Offline-by-default is a release-blocking requirement; keep this assertion strict.
     assert config.offline_mode is True
-    assert config.models.runtime in {"ollama", "mlx", "vllm"}
+    assert config.models.runtime in {
+        "ollama",
+        "openai",
+        "openrouter",
+        "groq",
+        "lmstudio",
+        "vllm",
+        "llamacpp",
+        "anthropic",
+        "gemini",
+    }
     assert config.log_level == "INFO"
+
+
+@pytest.mark.parametrize(
+    "runtime",
+    [
+        "ollama",
+        "openai",
+        "openrouter",
+        "groq",
+        "lmstudio",
+        "lm-studio",
+        "vllm",
+        "llamacpp",
+        "llama.cpp",
+        "anthropic",
+        "gemini",
+    ],
+)
+def test_supported_llm_runtimes_load(tmp_path: Path, runtime: str) -> None:
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text(
+        "corpus_path: ./data/corpus\n"
+        "index_path: ./data/index\n"
+        "models:\n"
+        f"  runtime: {runtime}\n"
+        "  llm_model: x\n"
+        "  embedding_model: y\n"
+        "  ollama_base_url: http://localhost:11434\n"
+        "offline_mode: true\n"
+        "log_level: INFO\n",
+        encoding="utf-8",
+    )
+    config = load_config(cfg)
+    assert config.models.runtime in {
+        "ollama",
+        "openai",
+        "openrouter",
+        "groq",
+        "lmstudio",
+        "vllm",
+        "llamacpp",
+        "anthropic",
+        "gemini",
+    }
 
 
 def test_resolve_paths_makes_paths_absolute(tmp_path: Path) -> None:

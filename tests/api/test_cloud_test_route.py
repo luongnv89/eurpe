@@ -27,7 +27,7 @@ class TestCloudTestRoute:
                 json={
                     "provider": "bedrock",
                     "model": "anthropic.claude-v2",
-                    "api_key": "sk-xxx",
+                    "api_key": "sk-xxx",  # pragma: allowlist secret
                 },  # pragma: allowlist secret
             )
             assert resp.status_code == 400
@@ -56,7 +56,7 @@ class TestCloudTestRoute:
                 json={
                     "provider": "openai",
                     "model": "gpt-4o",
-                    "api_key": "sk-test",
+                    "api_key": "sk-test",  # pragma: allowlist secret
                 },  # pragma: allowlist secret
             )
             assert resp.status_code == 200
@@ -81,7 +81,7 @@ class TestCloudTestRoute:
                 json={
                     "provider": "openai",
                     "model": "gpt-4o",
-                    "api_key": "sk-bad",
+                    "api_key": "sk-bad",  # pragma: allowlist secret
                 },  # pragma: allowlist secret
             )
             assert resp.status_code == 200
@@ -100,6 +100,10 @@ class TestCloudTestRoute:
             for provider in ["openai", "anthropic", "gemini", "openrouter", "groq"]:
                 resp = client.post(
                     "/api/cloud/test",
-                    json={"provider": provider, "model": "test-model", "api_key": "sk-test"},
+                    json={
+                        "provider": provider,
+                        "model": "test-model",
+                        "api_key": "sk-test",  # pragma: allowlist secret
+                    },
                 )
                 assert resp.status_code == 200, f"{provider} should return 200"

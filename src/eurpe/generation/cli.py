@@ -77,6 +77,7 @@ from eurpe.retrieval import (
     make_embedder,
 )
 from eurpe.schema import Programme, SectionType
+from eurpe.security import SecurityError
 
 # A sub-Typer so the CLI surface is ``eurpe generate section``. Wired
 # into the top-level app in :mod:`eurpe.cli`.
@@ -433,7 +434,18 @@ def section(
     # runs ``eurpe analytics export``.
     analytics = make_analytics_logger(cfg)
 
-    llm = make_llm_client(cfg)
+    try:
+        llm = make_llm_client(cfg)
+    except LLMUnavailableError as exc:
+        typer.echo(f"error: LLM unavailable: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    except GenerationError as exc:
+        typer.echo(f"error: generation setup failed: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    except SecurityError as exc:
+        typer.echo(f"error: network policy denied generation setup: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
     workflow = SectionGenerationWorkflow(retriever=retriever, llm=llm, analytics=analytics)
     # The critic loop reuses the same LLM client for critique by default.
     # See ``GenerationService`` for the rationale; the CLI mirrors that
@@ -511,6 +523,9 @@ def section(
     except GenerationError as exc:
         typer.echo(f"error: generation failed: {exc}", err=True)
         raise typer.Exit(code=1) from exc
+    except SecurityError as exc:
+        typer.echo(f"error: network policy denied generation: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
 
     # Critic loop (Task 3.2 / issue #16). When --iterations > 1, run
     # the loop synchronously up to the cap. Ctrl+C between iterations
@@ -539,6 +554,9 @@ def section(
                 raise typer.Exit(code=1) from exc
             except GenerationError as exc:
                 typer.echo(f"error: iteration failed: {exc}", err=True)
+                raise typer.Exit(code=1) from exc
+            except SecurityError as exc:
+                typer.echo(f"error: network policy denied iteration: {exc}", err=True)
                 raise typer.Exit(code=1) from exc
             draft = result.draft
             if result.stopped:
@@ -602,7 +620,8 @@ def section(
                         section_type=section_enum.value,
                     )
                 )
-            except Exception:  # pragma: no cover - analytics failures must not break export
+            # Analytics failures must not block the user's export artefacts.
+            except Exception:  # pragma: no cover  # nosec B110
                 pass
 
     sys.stdout.flush()

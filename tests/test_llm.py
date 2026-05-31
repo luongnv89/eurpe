@@ -21,15 +21,26 @@ import pytest
 from eurpe.config import EurpeConfig, ModelsConfig
 from eurpe.generation.errors import GenerationError, LLMUnavailableError
 from eurpe.generation.llm import (
+    AnthropicLLMClient,
     DeterministicLLMClient,
+    GeminiLLMClient,
     OllamaLLMClient,
+    OpenAICompatibleLLMClient,
     _ollama_llm_reachable,
     make_llm_client,
 )
+from eurpe.security import AllowlistEntry, EgressDeniedError, NetworkPolicyGate
 
 # ---------------------------------------------------------------------------
 # DeterministicLLMClient
 # ---------------------------------------------------------------------------
+
+
+def _allow_policy(tmp_path, host: str, port: int = 443) -> NetworkPolicyGate:
+    return NetworkPolicyGate(
+        allowlist=[AllowlistEntry(host=host, port=port, reason="test provider")],
+        audit_log_path=tmp_path / "network-audit.log",
+    )
 
 
 def _stub_prompt_with_citations(*marker_ids: int) -> str:
@@ -321,6 +332,309 @@ def test_make_llm_client_skips_probe_when_offline_disabled(
     client = make_llm_client(cfg)
     assert isinstance(client, OllamaLLMClient)
     assert called["probed"] is False
+
+
+@pytest.mark.parametrize(
+    ("runtime", "env_name", "expected_base_url"),
+    [
+        ("openai", "OPENAI_API_KEY", "https://api.openai.com/v1"),
+        ("openrouter", "OPENROUTER_API_KEY", "https://openrouter.ai/api/v1"),
+        ("groq", "GROQ_API_KEY", "https://api.groq.com/openai/v1"),
+    ],
+)
+def test_make_llm_client_routes_cloud_openai_compatible_providers(
+    monkeypatch: pytest.MonkeyPatch,
+    runtime: str,
+    env_name: str,
+    expected_base_url: str,
+) -> None:
+    """Cloud OpenAI-compatible providers are selectable and read keys from env."""
+
+    monkeypatch.setenv(env_name, "test-token-placeholder")
+    cfg = _config_with(models=ModelsConfig(runtime=runtime, llm_model="provider-model"))
+    client = make_llm_client(cfg)
+    assert isinstance(client, OpenAICompatibleLLMClient)
+    assert client.provider == runtime
+    assert client.base_url == expected_base_url
+    assert client.model == "provider-model"
+
+
+@pytest.mark.parametrize(
+    ("runtime", "expected_base_url"),
+    [
+        ("lmstudio", "http://localhost:1234/v1"),
+        ("vllm", "http://localhost:8000/v1"),
+        ("llamacpp", "http://localhost:8080/v1"),
+    ],
+)
+def test_make_llm_client_routes_local_openai_compatible_engines(
+    runtime: str,
+    expected_base_url: str,
+) -> None:
+    """Local OpenAI-compatible engines require no API key by default."""
+
+    cfg = _config_with(models=ModelsConfig(runtime=runtime, llm_model="local-model"))
+    client = make_llm_client(cfg)
+    assert isinstance(client, OpenAICompatibleLLMClient)
+    assert client.provider == runtime
+    assert client.base_url == expected_base_url
+    assert client.model == "local-model"
+
+
+def test_make_llm_client_routes_anthropic(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-token-placeholder")
+    cfg = _config_with(models=ModelsConfig(runtime="anthropic", llm_model="claude-3-haiku"))
+    client = make_llm_client(cfg)
+    assert isinstance(client, AnthropicLLMClient)
+    assert client.base_url == "https://api.anthropic.com"
+    assert client.model == "claude-3-haiku"
+
+
+def test_make_llm_client_routes_gemini(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GEMINI_API_KEY", "test-token-placeholder")
+    cfg = _config_with(models=ModelsConfig(runtime="gemini", llm_model="gemini-1.5-flash"))
+    client = make_llm_client(cfg)
+    assert isinstance(client, GeminiLLMClient)
+    assert client.base_url == "https://generativelanguage.googleapis.com"
+    assert client.model == "gemini-1.5-flash"
+
+
+@pytest.mark.parametrize(
+    ("runtime", "env_name"),
+    [
+        ("openai", "OPENAI_API_KEY"),
+        ("openrouter", "OPENROUTER_API_KEY"),
+        ("groq", "GROQ_API_KEY"),
+        ("anthropic", "ANTHROPIC_API_KEY"),
+        ("gemini", "GEMINI_API_KEY"),
+    ],
+)
+def test_make_llm_client_requires_cloud_api_keys(
+    monkeypatch: pytest.MonkeyPatch,
+    runtime: str,
+    env_name: str,
+) -> None:
+    """Missing provider secrets fail clearly without reading config.yaml secrets."""
+
+    monkeypatch.delenv(env_name, raising=False)
+    cfg = _config_with(models=ModelsConfig(runtime=runtime, llm_model="provider-model"))
+    with pytest.raises(LLMUnavailableError, match=env_name):
+        make_llm_client(cfg)
+
+
+def test_make_llm_client_honours_custom_api_key_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setenv("EURPE_TEST_OPENAI_KEY", "test-token-placeholder")
+    cfg = _config_with(
+        models=ModelsConfig(
+            runtime="openai",
+            llm_model="gpt-test",
+            llm_api_key_env="EURPE_TEST_OPENAI_KEY",  # pragma: allowlist secret
+        )
+    )
+    client = make_llm_client(cfg)
+    assert isinstance(client, OpenAICompatibleLLMClient)
+
+
+def test_openai_compatible_client_request_shape(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    """The shared client sends chat-completions payloads and bearer auth."""
+
+    captured: dict[str, object] = {}
+
+    class _OkClient:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            captured["timeout"] = kwargs.get("timeout")
+
+        def __enter__(self) -> _OkClient:
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def post(
+            self,
+            url: str,
+            *,
+            json: dict[str, object],
+            headers: dict[str, str],
+        ) -> httpx.Response:
+            captured["url"] = url
+            captured["json"] = json
+            captured["headers"] = headers
+            return httpx.Response(
+                status_code=200,
+                json={"choices": [{"message": {"content": "provider output"}}]},
+                request=httpx.Request("POST", url),
+            )
+
+    monkeypatch.setattr("eurpe.generation.llm.httpx.Client", _OkClient)
+    client = OpenAICompatibleLLMClient(
+        provider="openai",
+        base_url="https://api.openai.com/v1",
+        model="gpt-test",
+        api_key="test-token-placeholder",  # pragma: allowlist secret
+        policy=_allow_policy(tmp_path, "api.openai.com"),
+    )
+    out = client.generate("the prompt", max_tokens=64, temperature=0.4)
+    assert out == "provider output"
+    assert captured["url"] == "https://api.openai.com/v1/chat/completions"
+    assert captured["headers"] == {"Authorization": "Bearer test-token-placeholder"}
+    body = captured["json"]
+    assert isinstance(body, dict)
+    assert body["model"] == "gpt-test"
+    assert body["messages"] == [{"role": "user", "content": "the prompt"}]
+    assert body["max_tokens"] == 64
+    assert body["temperature"] == 0.4
+
+
+def test_cloud_provider_requires_policy_before_httpx(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Direct cloud-client construction must not bypass the network gate."""
+
+    class _UnexpectedClient:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        def __enter__(self) -> _UnexpectedClient:
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def post(self, *args: object, **kwargs: object) -> httpx.Response:
+            raise AssertionError("httpx must not be called without a policy")
+
+    monkeypatch.setattr("eurpe.generation.llm.httpx.Client", _UnexpectedClient)
+    client = OpenAICompatibleLLMClient(
+        provider="openai",
+        base_url="https://api.openai.com/v1",
+        model="gpt-test",
+        api_key="test-token-placeholder",  # pragma: allowlist secret
+    )
+    with pytest.raises(LLMUnavailableError, match="NetworkPolicyGate"):
+        client.generate("confidential prompt")
+
+
+def test_cloud_provider_policy_denies_before_httpx(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A non-allowlisted cloud host is blocked before prompt content reaches httpx."""
+
+    class _UnexpectedClient:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        def __enter__(self) -> _UnexpectedClient:
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def post(self, *args: object, **kwargs: object) -> httpx.Response:
+            raise AssertionError("httpx must not be called after a policy deny")
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-token-placeholder")
+    monkeypatch.setattr("eurpe.generation.llm.httpx.Client", _UnexpectedClient)
+    cfg = _config_with(models=ModelsConfig(runtime="openai", llm_model="gpt-test"))
+    client = make_llm_client(cfg)
+    with pytest.raises(EgressDeniedError):
+        client.generate("confidential prompt")
+
+
+def test_anthropic_client_request_shape(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class _OkClient:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        def __enter__(self) -> _OkClient:
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def post(
+            self,
+            url: str,
+            *,
+            json: dict[str, object],
+            headers: dict[str, str],
+        ) -> httpx.Response:
+            captured["url"] = url
+            captured["json"] = json
+            captured["headers"] = headers
+            return httpx.Response(
+                status_code=200,
+                json={"content": [{"type": "text", "text": "anthropic output"}]},
+                request=httpx.Request("POST", url),
+            )
+
+    monkeypatch.setattr("eurpe.generation.llm.httpx.Client", _OkClient)
+    client = AnthropicLLMClient(
+        base_url="https://api.anthropic.com",
+        model="claude-test",
+        api_key="test-token-placeholder",  # pragma: allowlist secret
+        policy=_allow_policy(tmp_path, "api.anthropic.com"),
+    )
+    assert client.generate("the prompt", max_tokens=32) == "anthropic output"
+    assert captured["url"] == "https://api.anthropic.com/v1/messages"
+    headers = captured["headers"]
+    assert isinstance(headers, dict)
+    assert headers["x-api-key"] == "test-token-placeholder"
+    assert headers["anthropic-version"] == "2023-06-01"
+
+
+def test_gemini_client_request_shape(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class _OkClient:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        def __enter__(self) -> _OkClient:
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def post(
+            self,
+            url: str,
+            *,
+            json: dict[str, object],
+            headers: dict[str, str],
+        ) -> httpx.Response:
+            captured["url"] = url
+            captured["json"] = json
+            captured["headers"] = headers
+            return httpx.Response(
+                status_code=200,
+                json={"candidates": [{"content": {"parts": [{"text": "gemini output"}]}}]},
+                request=httpx.Request("POST", url),
+            )
+
+    monkeypatch.setattr("eurpe.generation.llm.httpx.Client", _OkClient)
+    client = GeminiLLMClient(
+        base_url="https://generativelanguage.googleapis.com",
+        model="gemini-test",
+        api_key="test-token-placeholder",  # pragma: allowlist secret
+        policy=_allow_policy(tmp_path, "generativelanguage.googleapis.com"),
+    )
+    assert client.generate("the prompt", temperature=0.1) == "gemini output"
+    assert (
+        captured["url"]
+        == "https://generativelanguage.googleapis.com/v1beta/models/gemini-test:generateContent"
+    )
+    assert captured["headers"] == {"x-goog-api-key": "test-token-placeholder"}
 
 
 def test_make_llm_client_falls_back_with_blocked_probe(

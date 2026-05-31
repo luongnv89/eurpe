@@ -13,12 +13,26 @@ index_path: ./data/index
 # nothing here is the source of truth for the corpus or the index.
 runtime_dir: ./data/runtime
 
-# Local model runtime configuration (no network calls in offline mode).
+# Model runtime configuration. Default remains local/offline. Cloud
+# providers require an env-var API key and an explicit network_allowlist
+# entry for the provider host:443 before a request can leave the machine.
 models:
-  runtime: ollama        # ollama | mlx | vllm
+  runtime: ollama        # ollama | openai | openrouter | groq | lmstudio | vllm | llamacpp | anthropic | gemini
   llm_model: llama3.1:8b
   embedding_model: nomic-embed-text
   ollama_base_url: http://localhost:11434
+  # Optional generation backend override. Examples:
+  #   OpenAI-compatible local servers:
+  #     LM Studio: http://localhost:1234/v1
+  #     vLLM:      http://localhost:8000/v1
+  #     llama.cpp: http://localhost:8080/v1
+  #   Cloud providers usually use built-in defaults; override only for
+  #   proxies/self-hosted gateways.
+  llm_base_url:
+  # Environment variable name containing the API key/token. Leave blank
+  # to use provider defaults such as OPENAI_API_KEY, ANTHROPIC_API_KEY,
+  # GEMINI_API_KEY, OPENROUTER_API_KEY, GROQ_API_KEY, or VLLM_API_KEY.
+  llm_api_key_env:
 
 # Block all outbound network access by default.
 offline_mode: true

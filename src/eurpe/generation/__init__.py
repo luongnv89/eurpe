@@ -2,8 +2,9 @@
 
 Hosts the section-generation workflow: retrieve relevant past-proposal
 evidence, build a source-status-aware prompt, call a local LLM
-(Ollama or a deterministic stub), validate citation markers, and
-return a structured :class:`GenerationDraft`.
+(Ollama/local OpenAI-compatible engines) or explicitly configured cloud
+provider, validate citation markers, and return a structured
+:class:`GenerationDraft`.
 
 Public surface kept narrow on purpose so the rest of the codebase
 imports from ``eurpe.generation`` rather than internal modules:
@@ -13,9 +14,8 @@ imports from ``eurpe.generation`` rather than internal modules:
   the workflow.
 * :class:`SectionPromptBuilder` — turns request + retrieval results
   into an LLM prompt and a structured citation list.
-* :class:`LLMClient` (protocol), :class:`OllamaLLMClient`,
-  :class:`DeterministicLLMClient`, :func:`make_llm_client` — LLM
-  client backends and factory.
+* :class:`LLMClient` (protocol), :class:`DeterministicLLMClient`,
+  :func:`make_llm_client` — LLM client backends and factory.
 * :class:`SectionGenerationWorkflow` — orchestrates the full
   retrieve → prompt → generate → validate → assemble pipeline.
 * :class:`MarkdownCitationRenderer`, :data:`STATUS_LABEL`,
@@ -59,12 +59,7 @@ from eurpe.generation.errors import (
     LLMUnavailableError,
     OfflineLLMError,
 )
-from eurpe.generation.llm import (
-    DeterministicLLMClient,
-    LLMClient,
-    OllamaLLMClient,
-    make_llm_client,
-)
+from eurpe.generation.llm import DeterministicLLMClient, LLMClient, OllamaLLMClient, make_llm_client
 from eurpe.generation.models import (
     CitationRef,
     GenerationDraft,

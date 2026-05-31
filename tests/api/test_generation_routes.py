@@ -36,6 +36,7 @@ from eurpe.generation import (
 )
 from eurpe.generation.models import CitationRef, IterationRecord
 from eurpe.schema import Programme, SectionType, SourceStatus
+from eurpe.security import SecurityError
 from tests._helpers.offline import write_offline_config
 
 
@@ -84,6 +85,8 @@ class _StubService:
             raise LLMUnavailableError("Ollama daemon offline")
         if self._behaviour == "generation_error":
             raise GenerationError("the LLM cited an unknown source")
+        if self._behaviour == "security_error":
+            raise SecurityError("egress denied by test policy")
         if self._behaviour == "missing_profile":
             raise FileNotFoundError("profile not bundled")
         if self._behaviour == "happy":
@@ -121,6 +124,8 @@ class _StubService:
             raise LLMUnavailableError("Ollama daemon offline")
         if self._behaviour == "generation_error":
             raise GenerationError("the critic produced an invalid response")
+        if self._behaviour == "security_error":
+            raise SecurityError("egress denied by test policy")
         if self._behaviour == "missing_profile":
             raise FileNotFoundError("profile not bundled")
         if self._behaviour == "happy":
@@ -128,7 +133,7 @@ class _StubService:
             record = IterationRecord(
                 iteration_index=new_index,
                 changes_summary=(
-                    f"Iteration {new_index} expanded the draft. " "text +50 chars, citations +0."
+                    f"Iteration {new_index} expanded the draft. text +50 chars, citations +0."
                 ),
                 requirements_checked=[
                     "default-section-guidance",
@@ -302,6 +307,43 @@ def test_generate_section_maps_llm_unavailable_to_503(
     assert "LLM unavailable" in response.text
 
 
+def test_generate_section_maps_dependency_llm_unavailable_to_503(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """LLM setup errors from FastAPI dependencies use the same 503 envelope."""
+
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setattr(
+        "eurpe.retrieval.embeddings._ollama_reachable",
+        lambda *_args, **_kwargs: False,
+    )
+    cfg_path = write_offline_config(
+        tmp_path,
+        models={
+            "runtime": "openai",
+            "llm_model": "gpt-4o-mini",
+            "embedding_model": "nomic-embed-text",
+            "ollama_base_url": "http://localhost:1",
+        },
+    )
+    deps.set_config_path(cfg_path)
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/generation/section",
+                json={
+                    "section_type": SectionType.METHODOLOGY.value,
+                    "user_intent": "describe something",
+                },
+            )
+    finally:
+        deps.reset_dependency_caches()
+
+    assert response.status_code == 503, response.text
+    assert "OPENAI_API_KEY" in response.text
+
+
 def test_generate_section_maps_generation_error_to_500(
     configured_app: TestClient,
 ) -> None:
@@ -315,6 +357,21 @@ def test_generate_section_maps_generation_error_to_500(
     response = configured_app.post("/api/generation/section", json=payload)
     assert response.status_code == 500, response.text
     assert "generation failed" in response.text
+
+
+def test_generate_section_maps_security_error_to_403(
+    configured_app: TestClient,
+) -> None:
+    """Network policy denials become operator-visible 403 responses."""
+
+    _override_with(configured_app, "security_error")
+    payload = {
+        "section_type": SectionType.METHODOLOGY.value,
+        "user_intent": "describe something",
+    }
+    response = configured_app.post("/api/generation/section", json=payload)
+    assert response.status_code == 403, response.text
+    assert "network policy denied generation" in response.text
 
 
 def test_generate_section_maps_missing_profile_to_400(
@@ -488,6 +545,12 @@ class TestIterateSectionRoute:
         response = configured_app.post("/api/generation/section/iterate", json=_iterate_payload())
         assert response.status_code == 500, response.text
         assert "iteration failed" in response.text
+
+    def test_security_error_maps_to_403(self, configured_app: TestClient) -> None:
+        _override_with(configured_app, "security_error")
+        response = configured_app.post("/api/generation/section/iterate", json=_iterate_payload())
+        assert response.status_code == 403, response.text
+        assert "network policy denied generation" in response.text
 
     def test_missing_profile_maps_to_400(self, configured_app: TestClient) -> None:
         _override_with(configured_app, "missing_profile")

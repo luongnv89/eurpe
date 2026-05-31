@@ -154,7 +154,7 @@ for the most recent smoke-mode evidence trail.
 |---|---|
 | Orchestration | [LangGraph](https://langchain-ai.github.io/langgraph/) |
 | PDF parsing | [Docling](https://github.com/DS4SD/docling) |
-| Local LLM | [Ollama](https://ollama.com/) (`llama3.1:8b`) |
+| LLM runtime | Offline default: [Ollama](https://ollama.com/) (`llama3.1:8b`); optional providers/engines: OpenAI, OpenRouter, Groq, Anthropic, Gemini, LM Studio, vLLM, llama.cpp |
 | Embeddings | `nomic-embed-text` via Ollama |
 | Vector store | [Chroma](https://www.trychroma.com/) |
 | Backend | [FastAPI](https://fastapi.tiangolo.com/) + [Typer](https://typer.tiangolo.com/) |
@@ -165,6 +165,9 @@ for the most recent smoke-mode evidence trail.
 
 - `offline_mode: true` is the default in `config.example.yaml` and must
   be preserved in `config.yaml` for confidential proposal work.
+- Cloud LLM providers require an environment-variable API key plus an
+  explicit `network_allowlist` host:port entry. See
+  [`docs/llm-providers.md`](docs/llm-providers.md).
 - FastAPI binds to `127.0.0.1` only (see `src/eurpe/api/main.py`).
 - Vite binds to `127.0.0.1` only (see `frontend/vite.config.ts`).
 - `proposals/`, `corpus/`, `*.pdf`, `*.docx`, `*.pptx`, `*.xlsx` are

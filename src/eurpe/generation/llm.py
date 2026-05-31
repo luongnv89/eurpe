@@ -39,6 +39,7 @@ enough to verify the wiring.
 from __future__ import annotations
 
 import logging
+import os
 import re
 import socket
 from typing import Protocol
@@ -52,8 +53,85 @@ from eurpe.security import (
     NetworkPolicyGate,
     make_network_policy,
 )
+from eurpe.security.policy import _is_loopback
 
 logger = logging.getLogger(__name__)
+
+
+_OPENAI_COMPATIBLE_DEFAULTS: dict[str, tuple[str, str | None]] = {
+    "openai": ("https://api.openai.com/v1", "OPENAI_API_KEY"),
+    "openrouter": ("https://openrouter.ai/api/v1", "OPENROUTER_API_KEY"),
+    "groq": ("https://api.groq.com/openai/v1", "GROQ_API_KEY"),
+    "lmstudio": ("http://localhost:1234/v1", None),
+    "vllm": ("http://localhost:8000/v1", "VLLM_API_KEY"),
+    "llamacpp": ("http://localhost:8080/v1", None),
+}
+
+_ANTHROPIC_DEFAULT_BASE_URL = "https://api.anthropic.com"
+_GEMINI_DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com"
+
+
+def _url_port(parsed: object) -> int:
+    """Return the effective TCP port for a parsed HTTP(S) URL."""
+
+    port = getattr(parsed, "port", None)
+    if port is not None:
+        return int(port)
+    scheme = (getattr(parsed, "scheme", "") or "http").lower()
+    return 443 if scheme == "https" else 80
+
+
+def _requires_policy(base_url: str) -> bool:
+    """Return whether ``base_url`` needs an explicit network gate."""
+
+    parsed = urlparse(base_url)
+    return not _is_loopback(parsed.hostname or "")
+
+
+def _check_policy_or_raise(
+    *,
+    policy: NetworkPolicyGate | None,
+    base_url: str,
+    path: str,
+    source: str,
+    provider: str,
+    default_scheme: str,
+) -> None:
+    """Gate non-loopback HTTP before any prompt body reaches the transport."""
+
+    parsed = urlparse(base_url)
+    host = parsed.hostname or "localhost"
+    if policy is None:
+        if _is_loopback(host):
+            return
+        raise LLMUnavailableError(
+            f"{provider} requires a NetworkPolicyGate before contacting "
+            f"{host}:{_url_port(parsed)}. Use make_llm_client(config) so "
+            "non-loopback LLM traffic is checked against network_allowlist."
+        )
+    policy.check(
+        host=host,
+        port=_url_port(parsed),
+        scheme=parsed.scheme or default_scheme,
+        path=path,
+        source=source,
+    )
+
+
+def _read_api_key(*, provider: str, env_var: str | None, required: bool) -> str | None:
+    """Read a provider secret from the environment without logging its value."""
+
+    if not env_var:
+        return None
+    value = os.environ.get(env_var, "").strip()
+    if value:
+        return value
+    if required:
+        raise LLMUnavailableError(
+            f"{provider} requires an API key. Set the {env_var} environment variable "
+            "and retry. API keys must not be stored in config.yaml."
+        )
+    return None
 
 
 class LLMClient(Protocol):
@@ -219,6 +297,317 @@ class OllamaLLMClient:
 
 
 # ---------------------------------------------------------------------------
+# OpenAI-compatible chat-completions clients
+# ---------------------------------------------------------------------------
+
+
+class OpenAICompatibleLLMClient:
+    """LLM client for providers exposing ``/chat/completions``.
+
+    Covers OpenAI, OpenRouter, Groq, LM Studio, vLLM, and llama.cpp.
+    The client uses raw ``httpx`` calls instead of provider SDKs so the
+    dependency graph stays small and every request can pass through
+    :class:`NetworkPolicyGate` before prompt content reaches the
+    transport layer.
+    """
+
+    def __init__(
+        self,
+        *,
+        provider: str,
+        base_url: str,
+        model: str,
+        api_key: str | None = None,
+        timeout: float = 120.0,
+        policy: NetworkPolicyGate | None = None,
+    ) -> None:
+        self._provider = provider
+        self._base_url = base_url.rstrip("/")
+        self._model = model
+        self._api_key = api_key
+        self._timeout = timeout
+        self._policy = policy
+
+    @property
+    def model(self) -> str:
+        return self._model
+
+    @property
+    def provider(self) -> str:
+        return self._provider
+
+    @property
+    def base_url(self) -> str:
+        return self._base_url
+
+    def generate(
+        self,
+        prompt: str,
+        *,
+        max_tokens: int = 1024,
+        temperature: float = 0.2,
+    ) -> str:
+        path = "/chat/completions"
+        url = f"{self._base_url}{path}"
+        body = {
+            "model": self._model,
+            "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+        }
+        headers: dict[str, str] = {}
+        if self._api_key:
+            headers["Authorization"] = f"Bearer {self._api_key}"
+
+        _check_policy_or_raise(
+            policy=self._policy,
+            base_url=self._base_url,
+            path=path,
+            source=f"{self._provider}_llm.generate",
+            provider=self._provider,
+            default_scheme="http",
+        )
+
+        try:
+            with httpx.Client(timeout=self._timeout) as client:
+                resp = client.post(url, json=body, headers=headers)
+        except (httpx.ConnectError, httpx.ReadTimeout, httpx.ConnectTimeout) as exc:
+            raise LLMUnavailableError(
+                f"Cannot reach {self._provider} LLM endpoint at {self._base_url}: {exc}."
+            ) from exc
+        except httpx.HTTPError as exc:
+            raise GenerationError(
+                f"{self._provider} request to {self._base_url} failed: {exc}"
+            ) from exc
+
+        if resp.status_code >= 400:
+            raise GenerationError(
+                f"{self._provider} returned HTTP {resp.status_code} for "
+                f"model {self._model!r}: {resp.text[:500]}"
+            )
+
+        try:
+            payload = resp.json()
+        except ValueError as exc:
+            raise GenerationError(
+                f"{self._provider} returned non-JSON body for model "
+                f"{self._model!r}: {resp.text[:500]}"
+            ) from exc
+
+        choices = payload.get("choices")
+        if not isinstance(choices, list) or not choices:
+            raise GenerationError(
+                f"{self._provider} returned a malformed payload for "
+                f"model {self._model!r}: {payload!r}"
+            )
+        first = choices[0]
+        if not isinstance(first, dict):
+            raise GenerationError(
+                f"{self._provider} returned a malformed choice for model {self._model!r}."
+            )
+        message = first.get("message")
+        completion: object
+        if isinstance(message, dict):
+            completion = message.get("content")
+        else:
+            completion = first.get("text")
+        if not isinstance(completion, str) or not completion:
+            raise GenerationError(
+                f"{self._provider} returned an empty completion for model {self._model!r}."
+            )
+        return completion
+
+
+class AnthropicLLMClient:
+    """LLM client for Anthropic's Messages API."""
+
+    def __init__(
+        self,
+        *,
+        base_url: str,
+        model: str,
+        api_key: str,
+        timeout: float = 120.0,
+        policy: NetworkPolicyGate | None = None,
+    ) -> None:
+        self._base_url = base_url.rstrip("/")
+        self._model = model
+        self._api_key = api_key
+        self._timeout = timeout
+        self._policy = policy
+
+    @property
+    def model(self) -> str:
+        return self._model
+
+    @property
+    def base_url(self) -> str:
+        return self._base_url
+
+    def generate(
+        self,
+        prompt: str,
+        *,
+        max_tokens: int = 1024,
+        temperature: float = 0.2,
+    ) -> str:
+        path = "/v1/messages"
+        url = f"{self._base_url}{path}"
+        body = {
+            "model": self._model,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "messages": [{"role": "user", "content": prompt}],
+        }
+        headers = {
+            "x-api-key": self._api_key,
+            "anthropic-version": "2023-06-01",
+        }
+
+        _check_policy_or_raise(
+            policy=self._policy,
+            base_url=self._base_url,
+            path=path,
+            source="anthropic_llm.generate",
+            provider="Anthropic",
+            default_scheme="https",
+        )
+
+        try:
+            with httpx.Client(timeout=self._timeout) as client:
+                resp = client.post(url, json=body, headers=headers)
+        except (httpx.ConnectError, httpx.ReadTimeout, httpx.ConnectTimeout) as exc:
+            raise LLMUnavailableError(
+                f"Cannot reach Anthropic LLM endpoint at {self._base_url}: {exc}."
+            ) from exc
+        except httpx.HTTPError as exc:
+            raise GenerationError(f"Anthropic request to {self._base_url} failed: {exc}") from exc
+
+        if resp.status_code >= 400:
+            raise GenerationError(
+                f"Anthropic returned HTTP {resp.status_code} for "
+                f"model {self._model!r}: {resp.text[:500]}"
+            )
+
+        try:
+            payload = resp.json()
+        except ValueError as exc:
+            raise GenerationError(
+                f"Anthropic returned non-JSON body for model {self._model!r}: {resp.text[:500]}"
+            ) from exc
+
+        content = payload.get("content")
+        if not isinstance(content, list):
+            raise GenerationError(
+                f"Anthropic returned a malformed payload for model {self._model!r}: {payload!r}"
+            )
+        parts = [
+            item.get("text")
+            for item in content
+            if isinstance(item, dict) and item.get("type") == "text"
+        ]
+        completion = "".join(part for part in parts if isinstance(part, str)).strip()
+        if not completion:
+            raise GenerationError(f"Anthropic returned an empty completion for {self._model!r}.")
+        return completion
+
+
+class GeminiLLMClient:
+    """LLM client for Google Gemini ``generateContent``."""
+
+    def __init__(
+        self,
+        *,
+        base_url: str,
+        model: str,
+        api_key: str,
+        timeout: float = 120.0,
+        policy: NetworkPolicyGate | None = None,
+    ) -> None:
+        self._base_url = base_url.rstrip("/")
+        self._model = model
+        self._api_key = api_key
+        self._timeout = timeout
+        self._policy = policy
+
+    @property
+    def model(self) -> str:
+        return self._model
+
+    @property
+    def base_url(self) -> str:
+        return self._base_url
+
+    def generate(
+        self,
+        prompt: str,
+        *,
+        max_tokens: int = 1024,
+        temperature: float = 0.2,
+    ) -> str:
+        path = f"/v1beta/models/{self._model}:generateContent"
+        url = f"{self._base_url}{path}"
+        body = {
+            "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+            "generationConfig": {
+                "maxOutputTokens": max_tokens,
+                "temperature": temperature,
+            },
+        }
+        headers = {"x-goog-api-key": self._api_key}
+
+        _check_policy_or_raise(
+            policy=self._policy,
+            base_url=self._base_url,
+            path=path,
+            source="gemini_llm.generate",
+            provider="Gemini",
+            default_scheme="https",
+        )
+
+        try:
+            with httpx.Client(timeout=self._timeout) as client:
+                resp = client.post(url, json=body, headers=headers)
+        except (httpx.ConnectError, httpx.ReadTimeout, httpx.ConnectTimeout) as exc:
+            raise LLMUnavailableError(
+                f"Cannot reach Gemini LLM endpoint at {self._base_url}: {exc}."
+            ) from exc
+        except httpx.HTTPError as exc:
+            raise GenerationError(f"Gemini request to {self._base_url} failed: {exc}") from exc
+
+        if resp.status_code >= 400:
+            raise GenerationError(
+                f"Gemini returned HTTP {resp.status_code} for "
+                f"model {self._model!r}: {resp.text[:500]}"
+            )
+
+        try:
+            payload = resp.json()
+        except ValueError as exc:
+            raise GenerationError(
+                f"Gemini returned non-JSON body for model {self._model!r}: {resp.text[:500]}"
+            ) from exc
+
+        candidates = payload.get("candidates")
+        if not isinstance(candidates, list) or not candidates:
+            raise GenerationError(
+                f"Gemini returned a malformed payload for model {self._model!r}: {payload!r}"
+            )
+        content = candidates[0].get("content") if isinstance(candidates[0], dict) else None
+        parts = content.get("parts") if isinstance(content, dict) else None
+        if not isinstance(parts, list):
+            raise GenerationError(
+                f"Gemini returned a malformed candidate for model {self._model!r}."
+            )
+        completion = "".join(
+            part.get("text", "") for part in parts if isinstance(part, dict)
+        ).strip()
+        if not completion:
+            raise GenerationError(f"Gemini returned an empty completion for {self._model!r}.")
+        return completion
+
+
+# ---------------------------------------------------------------------------
 # Deterministic stub (offline-safe, deterministic, test-friendly)
 # ---------------------------------------------------------------------------
 
@@ -374,17 +763,20 @@ def make_llm_client(config: object) -> LLMClient:
 
     Strategy:
 
-    * If offline mode is on AND Ollama is unreachable → return
+    * If runtime is ``ollama`` and offline mode is on AND Ollama is unreachable → return
       :class:`DeterministicLLMClient` and log a warning. This is what
       keeps the offline contract intact: tests run without a daemon,
       and developers without Ollama still get a working pipeline
       (with degraded quality).
-    * If offline mode is on AND Ollama IS reachable → return
+    * If runtime is ``ollama`` and offline mode is on AND Ollama IS reachable → return
       :class:`OllamaLLMClient`. The user has Ollama; use it.
-    * If offline mode is OFF → return :class:`OllamaLLMClient`
-      unconditionally. The user explicitly opted into network access;
-      surfacing the connection error at first ``generate()`` call
-      gives a clearer trace than a probe-and-raise here would.
+    * If runtime is one of the OpenAI-compatible engines/providers,
+      return the matching HTTP client. Non-loopback requests still go
+      through :class:`NetworkPolicyGate`; selecting a cloud provider is
+      not enough to bypass the allowlist.
+    * If runtime is ``anthropic`` or ``gemini``, return the dedicated
+      client and require the provider API key from the configured
+      environment variable.
 
     The ``config`` parameter is typed ``object`` rather than
     ``EurpeConfig`` to avoid a top-level import cycle (the same trick
@@ -395,8 +787,11 @@ def make_llm_client(config: object) -> LLMClient:
 
     offline_mode = bool(getattr(config, "offline_mode", True))
     models = getattr(config, "models", None)
+    runtime = str(getattr(models, "runtime", "ollama")).lower()
     llm_model = getattr(models, "llm_model", "llama3.1:8b")
     ollama_base_url = getattr(models, "ollama_base_url", "http://localhost:11434")
+    llm_base_url = getattr(models, "llm_base_url", None)
+    api_key_env = getattr(models, "llm_api_key_env", None)
 
     # Build the gate once and pass it to both the probe and the
     # client. ``make_network_policy`` is duck-typed; a partial mock
@@ -409,10 +804,33 @@ def make_llm_client(config: object) -> LLMClient:
     policy: NetworkPolicyGate | None
     try:
         policy = make_network_policy(config)
-    except (ValueError, TypeError, AttributeError):  # pragma: no cover - defensive: degraded mock
+    except (ValueError, TypeError, AttributeError) as exc:  # pragma: no cover - defensive mock
+        if runtime != "ollama":
+            if runtime in _OPENAI_COMPATIBLE_DEFAULTS:
+                default_base_url, _default_env = _OPENAI_COMPATIBLE_DEFAULTS[runtime]
+                candidate_base_url = llm_base_url or default_base_url
+            elif runtime == "anthropic":
+                candidate_base_url = llm_base_url or _ANTHROPIC_DEFAULT_BASE_URL
+            elif runtime == "gemini":
+                candidate_base_url = llm_base_url or _GEMINI_DEFAULT_BASE_URL
+            else:
+                candidate_base_url = ""
+            if candidate_base_url and _requires_policy(candidate_base_url):
+                raise LLMUnavailableError(
+                    f"Cannot construct {runtime} LLM client without a network policy. "
+                    "Set config.runtime_dir or config.network_audit_log_path() so "
+                    "non-loopback generation can be checked before HTTP requests."
+                ) from exc
         policy = None
 
-    if offline_mode and not _ollama_llm_reachable(ollama_base_url, policy=policy):
+    if (
+        runtime == "ollama"
+        and offline_mode
+        and not _ollama_llm_reachable(
+            ollama_base_url,
+            policy=policy,
+        )
+    ):
         logger.warning(
             "Ollama not reachable at %s and offline_mode is on; "
             "falling back to DeterministicLLMClient. Drafting quality "
@@ -423,8 +841,45 @@ def make_llm_client(config: object) -> LLMClient:
         )
         return DeterministicLLMClient()
 
-    return OllamaLLMClient(
-        base_url=ollama_base_url,
-        model=llm_model,
-        policy=policy,
-    )
+    if runtime == "ollama":
+        return OllamaLLMClient(
+            base_url=ollama_base_url,
+            model=llm_model,
+            policy=policy,
+        )
+
+    if runtime in _OPENAI_COMPATIBLE_DEFAULTS:
+        default_base_url, default_env = _OPENAI_COMPATIBLE_DEFAULTS[runtime]
+        env_var = api_key_env or default_env
+        api_key = _read_api_key(
+            provider=runtime,
+            env_var=env_var,
+            required=default_env is not None and runtime != "vllm",
+        )
+        return OpenAICompatibleLLMClient(
+            provider=runtime,
+            base_url=llm_base_url or default_base_url,
+            model=llm_model,
+            api_key=api_key,
+            policy=policy,
+        )
+
+    if runtime == "anthropic":
+        env_var = api_key_env or "ANTHROPIC_API_KEY"
+        return AnthropicLLMClient(
+            base_url=llm_base_url or _ANTHROPIC_DEFAULT_BASE_URL,
+            model=llm_model,
+            api_key=_read_api_key(provider="anthropic", env_var=env_var, required=True) or "",
+            policy=policy,
+        )
+
+    if runtime == "gemini":
+        env_var = api_key_env or "GEMINI_API_KEY"
+        return GeminiLLMClient(
+            base_url=llm_base_url or _GEMINI_DEFAULT_BASE_URL,
+            model=llm_model,
+            api_key=_read_api_key(provider="gemini", env_var=env_var, required=True) or "",
+            policy=policy,
+        )
+
+    raise GenerationError(f"Unsupported LLM runtime {runtime!r}")

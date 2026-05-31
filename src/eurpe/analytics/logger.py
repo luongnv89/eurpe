@@ -122,7 +122,7 @@ def _get_analytics_logger(analytics_log_path: Path) -> logging.Logger:
             try:
                 logger.removeHandler(existing)
                 existing.close()
-            except Exception:  # pragma: no cover - defensive
+            except Exception:  # pragma: no cover - defensive; best-effort cleanup  # nosec B110
                 pass
         logger.addHandler(handler)
         _HANDLERS[key] = handler
@@ -171,7 +171,7 @@ def _reset_handlers_for_tests() -> None:
             try:
                 child.removeHandler(handler)
                 handler.close()
-            except Exception:  # pragma: no cover - defensive
+            except Exception:  # pragma: no cover - defensive; best-effort cleanup  # nosec B110
                 pass
         _HANDLERS.clear()
 
