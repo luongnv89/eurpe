@@ -217,18 +217,20 @@ class OllamaEmbedder:
     def model_name(self) -> str:
         return self._model
 
-    def embed(self, texts: list[str]) -> list[list[float]]:
-        """Embed each text via one ``/api/embeddings`` POST per item.
+    #: Texts per ``/api/embed`` request. Bounds request-body size for
+    #: corpus-sized builds while still amortising the HTTP round trip.
+    BATCH_SIZE = 64
 
-        Ollama's embeddings endpoint accepts a single ``prompt`` per
-        call, so we loop. The cost is dominated by the model on the
-        Ollama side, not by HTTP overhead, so micro-batching would not
-        help meaningfully. Using one ``httpx.Client`` for the whole
-        batch keeps the connection alive across calls.
+    def embed(self, texts: list[str]) -> list[list[float]]:
+        """Embed texts via Ollama's batch-capable ``/api/embed`` endpoint.
+
+        ``/api/embed`` accepts ``input: [...]`` so a whole batch costs
+        one round trip and lets the model batch server-side, instead of
+        one ``/api/embeddings`` POST per text.
         """
 
         out: list[list[float]] = []
-        url = f"{self._base_url}/api/embeddings"
+        url = f"{self._base_url}/api/embed"
         # Gate the first thing in the request lifecycle so a deny
         # raises BEFORE the httpx Client is even constructed. The
         # check is per-batch (not per-text) because the host:port and
@@ -239,27 +241,33 @@ class OllamaEmbedder:
                 host=parsed.hostname or "localhost",
                 port=parsed.port or 11434,
                 scheme=parsed.scheme or "http",
-                path="/api/embeddings",
+                path="/api/embed",
                 source="ollama_embedder.embed",
             )
         try:
             with httpx.Client(timeout=self._timeout) as client:
-                for text in texts:
-                    resp = client.post(url, json={"model": self._model, "prompt": text})
+                for start in range(0, len(texts), self.BATCH_SIZE):
+                    batch = texts[start : start + self.BATCH_SIZE]
+                    resp = client.post(url, json={"model": self._model, "input": batch})
                     resp.raise_for_status()
                     payload = resp.json()
-                    embedding = payload.get("embedding")
-                    if not isinstance(embedding, list) or not embedding:
+                    embeddings = payload.get("embeddings")
+                    if not isinstance(embeddings, list) or len(embeddings) != len(batch):
                         raise EmbeddingError(
                             f"Ollama returned a malformed embedding payload: {payload!r}"
                         )
-                    if len(embedding) != self._dimension:
-                        raise EmbeddingError(
-                            f"Embedding dim mismatch for model {self._model!r}: "
-                            f"got {len(embedding)}, expected {self._dimension}. "
-                            "Did the model identifier change on the Ollama side?"
-                        )
-                    out.append([float(v) for v in embedding])
+                    for embedding in embeddings:
+                        if not isinstance(embedding, list) or not embedding:
+                            raise EmbeddingError(
+                                f"Ollama returned a malformed embedding payload: {payload!r}"
+                            )
+                        if len(embedding) != self._dimension:
+                            raise EmbeddingError(
+                                f"Embedding dim mismatch for model {self._model!r}: "
+                                f"got {len(embedding)}, expected {self._dimension}. "
+                                "Did the model identifier change on the Ollama side?"
+                            )
+                        out.append([float(v) for v in embedding])
         except httpx.HTTPError as exc:
             # ``httpx.HTTPError`` is the umbrella covering connect /
             # timeout / status errors. Wrap in :class:`EmbeddingError`

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   AlertCircle,
   Check,
@@ -133,23 +133,36 @@ export function SettingsPage() {
   const [instructions, setInstructions] = useState<Record<string, InstallInstructions>>({});
   const [expandedRuntime, setExpandedRuntime] = useState<string | null>(null);
 
+  // Request-id guards: Reload/Refresh/Save can each start a new fetch
+  // while an older one is still in flight (unreachable runtime probes
+  // take seconds to time out), and responses land in arrival order —
+  // without the guard a slower, staler response overwrites the newer
+  // state.
+  const configReqIdRef = useRef(0);
+  const runtimesReqIdRef = useRef(0);
+
   const loadConfig = useCallback(async () => {
+    const reqId = ++configReqIdRef.current;
     setLoadingConfig(true);
     setError(null);
     try {
       const cfg = await fetchConfig();
+      if (reqId !== configReqIdRef.current) return;
       setForm(formFromConfig(cfg));
     } catch (e: unknown) {
+      if (reqId !== configReqIdRef.current) return;
       setError(e instanceof Error ? e.message : "Failed to load configuration");
     } finally {
-      setLoadingConfig(false);
+      if (reqId === configReqIdRef.current) setLoadingConfig(false);
     }
   }, []);
 
   const loadRuntimes = useCallback(async () => {
+    const reqId = ++runtimesReqIdRef.current;
     setLoadingRuntimes(true);
     try {
       const data = await fetchAllRuntimes();
+      if (reqId !== runtimesReqIdRef.current) return;
       setAllRuntimes(data);
 
       const instMap: Record<string, InstallInstructions> = {};
@@ -165,11 +178,12 @@ export function SettingsPage() {
             }
           }),
       );
+      if (reqId !== runtimesReqIdRef.current) return;
       setInstructions(instMap);
     } catch {
       // Runtime diagnostics are supplementary; config editing still works.
     } finally {
-      setLoadingRuntimes(false);
+      if (reqId === runtimesReqIdRef.current) setLoadingRuntimes(false);
     }
   }, []);
 
@@ -199,6 +213,7 @@ export function SettingsPage() {
 
   const handleSave = async () => {
     if (!form) return;
+    const formAtSave = form;
     setSaving(true);
     setError(null);
     setSaved(false);
@@ -219,7 +234,10 @@ export function SettingsPage() {
         },
         network_allowlist: form.network_allowlist,
       });
-      setForm(formFromConfig(resp.config));
+      // Only rehydrate from the server echo if the form is untouched —
+      // otherwise keystrokes typed while the save round-trip was in
+      // flight would be silently reverted.
+      setForm((current) => (current === formAtSave ? formFromConfig(resp.config) : current));
       setSaved(true);
       await loadRuntimes();
       setTimeout(() => setSaved(false), 3000);

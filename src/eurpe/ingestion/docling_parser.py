@@ -62,6 +62,7 @@ successful return from :meth:`parse`.
 
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -144,6 +145,11 @@ class DoclingProposalParser:
         # download in non-offline mode). Tests that need a fresh instance
         # simply construct a new ``DoclingProposalParser``.
         self._converter: DocumentConverter | None = None
+        # Guards lazy converter construction: parallel ingests share one
+        # parser instance, and DocumentConverter construction is expensive
+        # (torch import, possible model download) — an unguarded
+        # check-then-set would let concurrent threads build it twice.
+        self._converter_lock = threading.Lock()
 
     @property
     def offline(self) -> bool:
@@ -215,16 +221,18 @@ class DoclingProposalParser:
             ) from exc
 
         if self._converter is None:
-            # Honour the offline contract by passing explicit pipeline
-            # options. ``do_ocr=False`` avoids the ~40 MB OCR-weights
-            # download; ``do_ocr=True`` requires the caller to have opted
-            # out of offline mode (enforced in ``__init__``).
-            pdf_options = PdfPipelineOptions(do_ocr=self._do_ocr)
-            self._converter = DocumentConverter(
-                format_options={
-                    InputFormat.PDF: PdfFormatOption(pipeline_options=pdf_options),
-                }
-            )
+            with self._converter_lock:
+                if self._converter is None:
+                    # Honour the offline contract by passing explicit pipeline
+                    # options. ``do_ocr=False`` avoids the ~40 MB OCR-weights
+                    # download; ``do_ocr=True`` requires the caller to have
+                    # opted out of offline mode (enforced in ``__init__``).
+                    pdf_options = PdfPipelineOptions(do_ocr=self._do_ocr)
+                    self._converter = DocumentConverter(
+                        format_options={
+                            InputFormat.PDF: PdfFormatOption(pipeline_options=pdf_options),
+                        }
+                    )
 
         try:
             result = self._converter.convert(str(path))

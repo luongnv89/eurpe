@@ -24,6 +24,7 @@ is never exercised in the fast tier — every test gets a fresh stub.
 
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 
 from fastapi import Depends
@@ -60,6 +61,16 @@ _chunker_cache: dict[str, HierarchicalChunker] = {}
 _index_cache: dict[tuple[str, str], ChromaIndex] = {}
 _token_store_cache: dict[str, ParseTokenStore] = {}
 _generation_service_cache: dict[tuple[str, str], GenerationService] = {}
+
+# FastAPI runs these sync providers on threadpool threads, so two
+# concurrent cold-start requests could otherwise both miss a cache and
+# both construct the singleton — for ChromaIndex that means a duplicate
+# ``chromadb.PersistentClient`` on the same on-disk path (OS file
+# locks). One lock covers every cache: misses are rare (first request
+# per config) and construction under the lock is what we want anyway.
+# Reentrant because ``get_generation_service`` calls ``get_index``
+# while holding it.
+_cache_lock = threading.RLock()
 
 # The configuration path used by every provider. Tests can override this
 # by clearing the caches and writing their own config — see
@@ -109,11 +120,15 @@ def get_config() -> EurpeConfig:
     cached = _config_cache.get(key)
     if cached is not None:
         return cached
-    used_path = ensure_config_file(_CONFIG_PATH, EXAMPLE_CONFIG_PATH)
-    cfg = load_config(used_path).resolve_paths()
-    ensure_runtime_dirs(cfg)
-    _config_cache[key] = cfg
-    return cfg
+    with _cache_lock:
+        cached = _config_cache.get(key)
+        if cached is not None:
+            return cached
+        used_path = ensure_config_file(_CONFIG_PATH, EXAMPLE_CONFIG_PATH)
+        cfg = load_config(used_path).resolve_paths()
+        ensure_runtime_dirs(cfg)
+        _config_cache[key] = cfg
+        return cfg
 
 
 def get_parser(cfg: EurpeConfig = Depends(get_config)) -> DoclingProposalParser:
@@ -130,9 +145,13 @@ def get_parser(cfg: EurpeConfig = Depends(get_config)) -> DoclingProposalParser:
     cached = _parser_cache.get(key)
     if cached is not None:
         return cached
-    parser = DoclingProposalParser(offline=cfg.offline_mode)
-    _parser_cache[key] = parser
-    return parser
+    with _cache_lock:
+        cached = _parser_cache.get(key)
+        if cached is not None:
+            return cached
+        parser = DoclingProposalParser(offline=cfg.offline_mode)
+        _parser_cache[key] = parser
+        return parser
 
 
 def get_chunker(cfg: EurpeConfig = Depends(get_config)) -> HierarchicalChunker:
@@ -151,9 +170,13 @@ def get_chunker(cfg: EurpeConfig = Depends(get_config)) -> HierarchicalChunker:
     cached = _chunker_cache.get(key)
     if cached is not None:
         return cached
-    chunker = HierarchicalChunker()
-    _chunker_cache[key] = chunker
-    return chunker
+    with _cache_lock:
+        cached = _chunker_cache.get(key)
+        if cached is not None:
+            return cached
+        chunker = HierarchicalChunker()
+        _chunker_cache[key] = chunker
+        return chunker
 
 
 def get_index(
@@ -177,14 +200,18 @@ def get_index(
     cached = _index_cache.get(key)
     if cached is not None:
         return cached
-    embedder = make_embedder(cfg)
-    index = ChromaIndex(
-        index_path=cfg.index_path,
-        embedder=embedder,
-        collection_name=collection,
-    )
-    _index_cache[key] = index
-    return index
+    with _cache_lock:
+        cached = _index_cache.get(key)
+        if cached is not None:
+            return cached
+        embedder = make_embedder(cfg)
+        index = ChromaIndex(
+            index_path=cfg.index_path,
+            embedder=embedder,
+            collection_name=collection,
+        )
+        _index_cache[key] = index
+        return index
 
 
 def get_token_store(cfg: EurpeConfig = Depends(get_config)) -> ParseTokenStore:
@@ -194,9 +221,13 @@ def get_token_store(cfg: EurpeConfig = Depends(get_config)) -> ParseTokenStore:
     cached = _token_store_cache.get(key)
     if cached is not None:
         return cached
-    store = ParseTokenStore(cfg.runtime_dir)
-    _token_store_cache[key] = store
-    return store
+    with _cache_lock:
+        cached = _token_store_cache.get(key)
+        if cached is not None:
+            return cached
+        store = ParseTokenStore(cfg.runtime_dir)
+        _token_store_cache[key] = store
+        return store
 
 
 def get_generation_service(
@@ -230,12 +261,22 @@ def get_generation_service(
     if cached is not None:
         return cached
 
-    embedder = make_embedder(cfg)
-    index = ChromaIndex(
-        index_path=cfg.index_path,
-        embedder=embedder,
-        collection_name=collection,
-    )
+    with _cache_lock:
+        cached = _generation_service_cache.get(key)
+        if cached is not None:
+            return cached
+        return _build_generation_service(cfg, collection=collection, key=key)
+
+
+def _build_generation_service(
+    cfg: EurpeConfig,
+    *,
+    collection: str,
+    key: tuple[str, str],
+) -> GenerationService:
+    # Reuse the cached ChromaIndex rather than opening a second
+    # PersistentClient (and embedder) on the same on-disk path.
+    index = get_index(cfg, collection=collection)
     # ``relevance_threshold=0.0`` mirrors the deterministic_workflow
     # fixture used in the service tests; with the production
     # SentenceTransformer fallback the threshold rarely matters because

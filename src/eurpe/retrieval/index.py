@@ -62,6 +62,11 @@ logger = logging.getLogger(__name__)
 #: constant exists so callers can compare against it instead of magic strings.
 _NONE_MARKER = "__none__"
 
+#: Row cap for the dedup lookups. They reduce matching chunks to a
+#: handful of distinct ``anchor.document_id`` values (callers use only
+#: the first), so fetching every chunk of a matched proposal is waste.
+_DEDUP_FETCH_LIMIT = 50
+
 
 def _metadata_to_chroma(meta: ChunkMetadata) -> dict[str, str | int | float | bool]:
     """Flatten a :class:`ChunkMetadata` into a Chroma-compatible dict.
@@ -320,12 +325,36 @@ class ChromaIndex:
         if top_k <= 0:
             raise ValueError(f"top_k must be positive, got {top_k}")
 
+        query_vec = self.embed_query(query_text)
+        return self.query_by_vector(query_vec, top_k=top_k, where=where)
+
+    def embed_query(self, query_text: str) -> list[float]:
+        """Embed ``query_text`` once so callers can reuse the vector.
+
+        A retriever that retries a query with a relaxed ``where`` clause
+        (section_type fallback) can pay the embedding cost once instead
+        of per attempt.
+        """
+
         try:
             (query_vec,) = self._embedder.embed([query_text])
         except Exception as exc:
             if isinstance(exc, IndexingError):
                 raise
             raise IndexingError(f"Embedder failed during query: {exc}") from exc
+        return query_vec
+
+    def query_by_vector(
+        self,
+        query_vec: list[float],
+        *,
+        top_k: int = 10,
+        where: dict[str, Any] | None = None,
+    ) -> list[tuple[Chunk, float]]:
+        """Same as :meth:`query` but takes an already-embedded vector."""
+
+        if top_k <= 0:
+            raise ValueError(f"top_k must be positive, got {top_k}")
 
         result = self._collection.query(
             query_embeddings=[query_vec],
@@ -391,9 +420,14 @@ class ChromaIndex:
         owning proposal is re-ingested.
         """
 
+        # Every chunk of a proposal shares the hash, so fetching all
+        # matching rows would materialise hundreds of metadata dicts to
+        # derive (usually) one document_id. A small limit covers the
+        # realistic distinct-document count while keeping the fetch O(1).
         result = self._collection.get(
             where={"proposal.content_hash": content_hash},
             include=["metadatas"],
+            limit=_DEDUP_FETCH_LIMIT,
         )
         metadatas = result.get("metadatas") or []
         document_ids: list[str] = []
@@ -427,6 +461,7 @@ class ChromaIndex:
                 ]
             },
             include=["metadatas"],
+            limit=_DEDUP_FETCH_LIMIT,
         )
         metadatas = result.get("metadatas") or []
         document_ids: list[str] = []

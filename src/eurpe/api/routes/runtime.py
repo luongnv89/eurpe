@@ -28,6 +28,7 @@ Error mapping
 from __future__ import annotations
 
 import logging
+from concurrent.futures import ThreadPoolExecutor
 
 from fastapi import APIRouter, HTTPException, status
 
@@ -103,25 +104,29 @@ def get_all_runtimes() -> AllRuntimesResponse:
         ) from exc
 
     active_runtime = config.models.runtime
-    statuses: list[RuntimeStatusResponse] = []
 
-    for runtime_key, info in RUNTIME_REGISTRY.items():
+    def _probe(runtime_key: str) -> RuntimeStatusResponse:
         # Use the configured URL for the active runtime, default for others
         base_url = None
         if runtime_key == active_runtime and runtime_key == "ollama":
             base_url = config.models.ollama_base_url
 
+        info = RUNTIME_REGISTRY[runtime_key]
         result = probe_runtime(runtime_key, base_url=base_url)
-        statuses.append(
-            RuntimeStatusResponse(
-                runtime=runtime_key,
-                display_name=info["display_name"],
-                endpoint=result.endpoint,
-                available=result.available,
-                models=result.models,
-                error=result.error,
-            )
+        return RuntimeStatusResponse(
+            runtime=runtime_key,
+            display_name=info["display_name"],
+            endpoint=result.endpoint,
+            available=result.available,
+            models=result.models,
+            error=result.error,
         )
+
+    # Probe concurrently: each unreachable runtime costs its full
+    # connect timeout, so serial probing makes the endpoint latency
+    # the SUM of the timeouts instead of the MAX.
+    with ThreadPoolExecutor(max_workers=len(RUNTIME_REGISTRY)) as pool:
+        statuses = list(pool.map(_probe, RUNTIME_REGISTRY))
 
     return AllRuntimesResponse(runtimes=statuses, active_runtime=active_runtime)
 

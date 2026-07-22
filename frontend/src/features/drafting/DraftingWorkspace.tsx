@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { AlertCircle, CheckCircle2, Download, Loader2, RefreshCw, Sparkles } from "lucide-react";
 
@@ -215,6 +215,12 @@ export function DraftingWorkspace() {
     }
   }, [callUrl]);
 
+  // Guards against a stale generate/refine response landing after the
+  // operator has reset the form or started a new run: each mutation of
+  // draft state bumps the id, and in-flight responses whose id no
+  // longer matches are dropped instead of overwriting fresh state.
+  const draftRunIdRef = useRef(0);
+
   const handleGenerate = useCallback(async () => {
     const errors: string[] = [];
     if (!sectionType) errors.push("section type is required");
@@ -260,14 +266,17 @@ export function DraftingWorkspace() {
       lessons_learned: lessonsLearned,
     };
 
+    const runId = ++draftRunIdRef.current;
     try {
       const result = await generateSection(body);
+      if (runId !== draftRunIdRef.current) return;
       setDraft(result);
     } catch (err) {
+      if (runId !== draftRunIdRef.current) return;
       setServerError(err instanceof Error ? err.message : String(err));
       setDraft(null);
     } finally {
-      setGenerating(false);
+      if (runId === draftRunIdRef.current) setGenerating(false);
     }
   }, [
     sectionType,
@@ -314,14 +323,17 @@ export function DraftingWorkspace() {
       prior_draft: draft,
     };
 
+    const runId = ++draftRunIdRef.current;
     try {
       const result = await iterateSection(body);
+      if (runId !== draftRunIdRef.current) return;
       setDraft(result.draft);
       setStoppedAtCap(result.stopped);
     } catch (err) {
+      if (runId !== draftRunIdRef.current) return;
       setServerError(err instanceof Error ? err.message : String(err));
     } finally {
-      setRefining(false);
+      if (runId === draftRunIdRef.current) setRefining(false);
     }
   }, [
     draft,
@@ -349,6 +361,11 @@ export function DraftingWorkspace() {
   }, []);
 
   function resetForm() {
+    // Invalidate any in-flight generate/refine so its late response
+    // cannot resurrect the draft we are about to clear.
+    draftRunIdRef.current++;
+    setGenerating(false);
+    setRefining(false);
     setSectionType("");
     setProfileProgramme(NONE_VALUE);
     setTargetProgramme(NONE_VALUE);
@@ -741,14 +758,19 @@ export function DraftingWorkspace() {
           )}
 
           <div className="flex flex-wrap items-center justify-end gap-2">
-            <Button type="button" variant="outline" onClick={resetForm} disabled={generating}>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={resetForm}
+              disabled={generating || refining}
+            >
               Reset
             </Button>
             <Button
               type="button"
               variant="amber"
               onClick={() => void handleGenerate()}
-              disabled={generating}
+              disabled={generating || refining}
             >
               {generating ? (
                 <>

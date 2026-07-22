@@ -435,8 +435,11 @@ class SourceStatusAwareRetriever:
         )
 
         # Step 2: over-fetch candidates so policy has room to work.
+        # Embed once so the section_type fallback below can reuse the
+        # vector instead of paying a second embedding call.
         candidate_k = min(_MAX_FETCH_CANDIDATES, top_k * _OVER_FETCH_MULTIPLIER)
-        raw = self._index.query(query, top_k=candidate_k, where=where)
+        query_vec = self._index.embed_query(query)
+        raw = self._index.query_by_vector(query_vec, top_k=candidate_k, where=where)
 
         # Step 2b (Issue #46): section_type fallback. Only fires when the
         # filter was actually section_type-bearing, the initial fetch
@@ -451,7 +454,9 @@ class SourceStatusAwareRetriever:
                 section_type=None,
                 source_status=None,
             )
-            fallback_raw = self._index.query(query, top_k=candidate_k, where=fallback_where)
+            fallback_raw = self._index.query_by_vector(
+                query_vec, top_k=candidate_k, where=fallback_where
+            )
             if fallback_raw:
                 logger.warning(
                     "section_type=%s filter returned 0 candidates; falling back "

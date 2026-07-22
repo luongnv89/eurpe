@@ -160,12 +160,38 @@ class LLMClient(Protocol):
         """Return the model's text completion of ``prompt``."""
 
 
+class _PooledHTTPClientMixin:
+    """One reusable ``httpx.Client`` per LLM client instance.
+
+    A fresh ``httpx.Client`` per ``generate()`` call means a fresh TCP
+    (and, for cloud providers, TLS) handshake per request — the critic
+    loop makes up to 10 LLM calls per draft, so connection reuse
+    matters. Created lazily so tests that monkeypatch ``httpx.Client``
+    after constructing the LLM client still get the fake.
+    """
+
+    _timeout: float
+    _pooled_client: httpx.Client | None = None
+
+    def _http_client(self) -> httpx.Client:
+        if self._pooled_client is None:
+            self._pooled_client = httpx.Client(timeout=self._timeout)
+        return self._pooled_client
+
+    def close(self) -> None:
+        """Release the pooled connection; safe to call more than once."""
+
+        if self._pooled_client is not None:
+            self._pooled_client.close()
+            self._pooled_client = None
+
+
 # ---------------------------------------------------------------------------
 # Ollama client (real model, talks to localhost)
 # ---------------------------------------------------------------------------
 
 
-class OllamaLLMClient:
+class OllamaLLMClient(_PooledHTTPClientMixin):
     """LLM client backed by a local Ollama daemon (``POST /api/generate``).
 
     Talks to ``localhost:11434`` by default — what a developer machine
@@ -256,8 +282,7 @@ class OllamaLLMClient:
                 source="ollama_llm.generate",
             )
         try:
-            with httpx.Client(timeout=self._timeout) as client:
-                resp = client.post(url, json=body)
+            resp = self._http_client().post(url, json=body)
         except (httpx.ConnectError, httpx.ReadTimeout, httpx.ConnectTimeout) as exc:
             # Connection-level failures are recoverable by the user
             # ("start ollama serve") — surface a distinct error type
@@ -301,7 +326,7 @@ class OllamaLLMClient:
 # ---------------------------------------------------------------------------
 
 
-class OpenAICompatibleLLMClient:
+class OpenAICompatibleLLMClient(_PooledHTTPClientMixin):
     """LLM client for providers exposing ``/chat/completions``.
 
     Covers OpenAI, OpenRouter, Groq, LM Studio, vLLM, and llama.cpp.
@@ -369,8 +394,7 @@ class OpenAICompatibleLLMClient:
         )
 
         try:
-            with httpx.Client(timeout=self._timeout) as client:
-                resp = client.post(url, json=body, headers=headers)
+            resp = self._http_client().post(url, json=body, headers=headers)
         except (httpx.ConnectError, httpx.ReadTimeout, httpx.ConnectTimeout) as exc:
             raise LLMUnavailableError(
                 f"Cannot reach {self._provider} LLM endpoint at {self._base_url}: {exc}."
@@ -418,7 +442,7 @@ class OpenAICompatibleLLMClient:
         return completion
 
 
-class AnthropicLLMClient:
+class AnthropicLLMClient(_PooledHTTPClientMixin):
     """LLM client for Anthropic's Messages API."""
 
     def __init__(
@@ -474,8 +498,7 @@ class AnthropicLLMClient:
         )
 
         try:
-            with httpx.Client(timeout=self._timeout) as client:
-                resp = client.post(url, json=body, headers=headers)
+            resp = self._http_client().post(url, json=body, headers=headers)
         except (httpx.ConnectError, httpx.ReadTimeout, httpx.ConnectTimeout) as exc:
             raise LLMUnavailableError(
                 f"Cannot reach Anthropic LLM endpoint at {self._base_url}: {exc}."
@@ -512,7 +535,7 @@ class AnthropicLLMClient:
         return completion
 
 
-class GeminiLLMClient:
+class GeminiLLMClient(_PooledHTTPClientMixin):
     """LLM client for Google Gemini ``generateContent``."""
 
     def __init__(
@@ -566,8 +589,7 @@ class GeminiLLMClient:
         )
 
         try:
-            with httpx.Client(timeout=self._timeout) as client:
-                resp = client.post(url, json=body, headers=headers)
+            resp = self._http_client().post(url, json=body, headers=headers)
         except (httpx.ConnectError, httpx.ReadTimeout, httpx.ConnectTimeout) as exc:
             raise LLMUnavailableError(
                 f"Cannot reach Gemini LLM endpoint at {self._base_url}: {exc}."
