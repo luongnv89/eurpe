@@ -191,7 +191,18 @@ class _PooledHTTPClientMixin:
         return self._pooled_client
 
     def close(self) -> None:
-        """Release the pooled connection; safe to call more than once."""
+        """Release the pooled connection; safe to call more than once.
+
+        Not synchronized against a concurrent in-flight ``generate()``:
+        if ``close()`` runs while a request is mid-``post()``, httpx
+        raises ``RuntimeError("... client has been closed.")`` from the
+        send. Every ``generate()`` implementation includes ``RuntimeError``
+        in its connection-failure catch so that lands as
+        :class:`~eurpe.generation.errors.LLMUnavailableError` (matching
+        the treatment of a dead connection) rather than an unhandled
+        500. This is a shutdown/test-reset timing window, not a
+        steady-state request-handling concern.
+        """
 
         if self._pooled_client is not None:
             self._pooled_client.close()
@@ -295,7 +306,7 @@ class OllamaLLMClient(_PooledHTTPClientMixin):
             )
         try:
             resp = self._http_client().post(url, json=body)
-        except (httpx.ConnectError, httpx.ReadTimeout, httpx.ConnectTimeout) as exc:
+        except (httpx.ConnectError, httpx.ReadTimeout, httpx.ConnectTimeout, RuntimeError) as exc:
             # Connection-level failures are recoverable by the user
             # ("start ollama serve") — surface a distinct error type
             # so the CLI can print an actionable message.
@@ -407,7 +418,7 @@ class OpenAICompatibleLLMClient(_PooledHTTPClientMixin):
 
         try:
             resp = self._http_client().post(url, json=body, headers=headers)
-        except (httpx.ConnectError, httpx.ReadTimeout, httpx.ConnectTimeout) as exc:
+        except (httpx.ConnectError, httpx.ReadTimeout, httpx.ConnectTimeout, RuntimeError) as exc:
             raise LLMUnavailableError(
                 f"Cannot reach {self._provider} LLM endpoint at {self._base_url}: {exc}."
             ) from exc
@@ -511,7 +522,7 @@ class AnthropicLLMClient(_PooledHTTPClientMixin):
 
         try:
             resp = self._http_client().post(url, json=body, headers=headers)
-        except (httpx.ConnectError, httpx.ReadTimeout, httpx.ConnectTimeout) as exc:
+        except (httpx.ConnectError, httpx.ReadTimeout, httpx.ConnectTimeout, RuntimeError) as exc:
             raise LLMUnavailableError(
                 f"Cannot reach Anthropic LLM endpoint at {self._base_url}: {exc}."
             ) from exc
@@ -602,7 +613,7 @@ class GeminiLLMClient(_PooledHTTPClientMixin):
 
         try:
             resp = self._http_client().post(url, json=body, headers=headers)
-        except (httpx.ConnectError, httpx.ReadTimeout, httpx.ConnectTimeout) as exc:
+        except (httpx.ConnectError, httpx.ReadTimeout, httpx.ConnectTimeout, RuntimeError) as exc:
             raise LLMUnavailableError(
                 f"Cannot reach Gemini LLM endpoint at {self._base_url}: {exc}."
             ) from exc

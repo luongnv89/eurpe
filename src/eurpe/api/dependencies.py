@@ -100,12 +100,19 @@ def close_llm_clients() -> None:
     ``_PooledHTTPClientMixin``). ``DeterministicLLMClient`` has no such
     resource, hence the ``getattr`` guard rather than an unconditional
     ``.close()`` call.
+
+    Holds ``_cache_lock`` while iterating: without it, a concurrent
+    ``get_generation_service()`` cold-start could mutate
+    ``_generation_service_cache`` (under the same lock) while this
+    function iterates it, or hand back a service whose client this
+    function has already started closing.
     """
 
-    for service in _generation_service_cache.values():
-        close = getattr(service.workflow.llm, "close", None)
-        if close is not None:
-            close()
+    with _cache_lock:
+        for service in _generation_service_cache.values():
+            close = getattr(service.workflow.llm, "close", None)
+            if close is not None:
+                close()
 
 
 def reset_dependency_caches() -> None:
@@ -113,15 +120,21 @@ def reset_dependency_caches() -> None:
 
     Tests call this in their teardown so cross-test state cannot leak
     (especially the open Chroma client, which holds a file lock).
+
+    Holds ``_cache_lock`` for the same reason as :func:`close_llm_clients`
+    — clearing the dicts while a locked provider call is mid-construction
+    would otherwise let that call repopulate a cache entry this function
+    is about to drop, or clear out from under it.
     """
 
-    close_llm_clients()
-    _config_cache.clear()
-    _parser_cache.clear()
-    _chunker_cache.clear()
-    _index_cache.clear()
-    _token_store_cache.clear()
-    _generation_service_cache.clear()
+    with _cache_lock:
+        close_llm_clients()
+        _config_cache.clear()
+        _parser_cache.clear()
+        _chunker_cache.clear()
+        _index_cache.clear()
+        _token_store_cache.clear()
+        _generation_service_cache.clear()
 
 
 def get_config() -> EurpeConfig:
