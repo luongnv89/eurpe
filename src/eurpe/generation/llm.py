@@ -42,6 +42,7 @@ import logging
 import os
 import re
 import socket
+import threading
 from typing import Protocol
 from urllib.parse import urlparse
 
@@ -160,6 +161,15 @@ class LLMClient(Protocol):
         """Return the model's text completion of ``prompt``."""
 
 
+# Guards lazy pooled-client construction (mirrors
+# DoclingProposalParser._converter_lock): an unguarded check-then-set
+# would let two concurrent first calls on the same cached LLM-client
+# singleton each build a Client, orphaning one. Shared across
+# instances/subclasses since creation is rare and cheap — it only
+# serializes the one-time construction, not actual request traffic.
+_pooled_client_creation_lock = threading.Lock()
+
+
 class _PooledHTTPClientMixin:
     """One reusable ``httpx.Client`` per LLM client instance.
 
@@ -175,7 +185,9 @@ class _PooledHTTPClientMixin:
 
     def _http_client(self) -> httpx.Client:
         if self._pooled_client is None:
-            self._pooled_client = httpx.Client(timeout=self._timeout)
+            with _pooled_client_creation_lock:
+                if self._pooled_client is None:
+                    self._pooled_client = httpx.Client(timeout=self._timeout)
         return self._pooled_client
 
     def close(self) -> None:

@@ -92,6 +92,22 @@ def set_config_path(config_path: Path) -> None:
     reset_dependency_caches()
 
 
+def close_llm_clients() -> None:
+    """Release the pooled ``httpx.Client`` held by every cached LLM client.
+
+    Cloud/Ollama clients built through :func:`make_llm_client` keep one
+    ``httpx.Client`` alive for the process lifetime (see
+    ``_PooledHTTPClientMixin``). ``DeterministicLLMClient`` has no such
+    resource, hence the ``getattr`` guard rather than an unconditional
+    ``.close()`` call.
+    """
+
+    for service in _generation_service_cache.values():
+        close = getattr(service.workflow.llm, "close", None)
+        if close is not None:
+            close()
+
+
 def reset_dependency_caches() -> None:
     """Drop every cached singleton so the next request rebuilds from disk.
 
@@ -99,6 +115,7 @@ def reset_dependency_caches() -> None:
     (especially the open Chroma client, which holds a file lock).
     """
 
+    close_llm_clients()
     _config_cache.clear()
     _parser_cache.clear()
     _chunker_cache.clear()
