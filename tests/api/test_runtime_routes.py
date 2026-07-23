@@ -8,6 +8,7 @@ states, and the HTTP-level probe functions are tested via
 
 from __future__ import annotations
 
+import threading
 import time
 from types import SimpleNamespace
 
@@ -333,10 +334,12 @@ class TestGetAllRuntimesConcurrency:
 
         probe_delay = 0.15
         call_count = 0
+        count_lock = threading.Lock()
 
         def fake_probe_runtime(runtime_key: str, *, base_url: str | None = None) -> RuntimeStatus:
             nonlocal call_count
-            call_count += 1
+            with count_lock:
+                call_count += 1
             time.sleep(probe_delay)
             info = RUNTIME_REGISTRY[runtime_key]
             return RuntimeStatus(

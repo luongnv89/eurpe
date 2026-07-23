@@ -834,7 +834,7 @@ export function DraftingWorkspace() {
                 type="button"
                 variant="outline"
                 onClick={handleAccept}
-                disabled={accepted || refining}
+                disabled={accepted || refining || generating}
                 aria-label="Accept this draft and stop the critic loop"
               >
                 <CheckCircle2 className="h-4 w-4" aria-hidden="true" />

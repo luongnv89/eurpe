@@ -141,6 +141,13 @@ export function SettingsPage() {
   const configReqIdRef = useRef(0);
   const runtimesReqIdRef = useRef(0);
 
+  // Mirrors `form` outside the render/commit cycle so handleSave can tell,
+  // after its await, whether the form is still the exact snapshot it saved.
+  const formRef = useRef<SettingsForm | null>(null);
+  useEffect(() => {
+    formRef.current = form;
+  }, [form]);
+
   const loadConfig = useCallback(async () => {
     const reqId = ++configReqIdRef.current;
     setLoadingConfig(true);
@@ -236,11 +243,15 @@ export function SettingsPage() {
       });
       // Only rehydrate from the server echo if the form is untouched —
       // otherwise keystrokes typed while the save round-trip was in
-      // flight would be silently reverted.
+      // flight would be silently reverted. The "Configuration saved"
+      // banner follows the same guard: if concurrent edits were
+      // detected and the echo was discarded, the visible (unsaved)
+      // edits were not actually persisted, so don't claim they were.
+      const formUnchanged = formRef.current === formAtSave;
       setForm((current) => (current === formAtSave ? formFromConfig(resp.config) : current));
-      setSaved(true);
+      if (formUnchanged) setSaved(true);
       await loadRuntimes();
-      setTimeout(() => setSaved(false), 3000);
+      if (formUnchanged) setTimeout(() => setSaved(false), 3000);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed to save configuration");
     } finally {
