@@ -8,6 +8,9 @@ states, and the HTTP-level probe functions are tested via
 
 from __future__ import annotations
 
+import time
+from types import SimpleNamespace
+
 import pytest
 
 from eurpe.api.runtime_probe import (
@@ -314,3 +317,51 @@ class TestLocalEmbedding:
         result = check_local_embedding("ollama", "nomic-embed-text")
         assert not result["success"]
         assert "unexpected response" in result["message"]
+
+
+class TestGetAllRuntimesConcurrency:
+    """``GET /api/runtime/all`` probes every runtime through a ThreadPoolExecutor.
+
+    Regression coverage for the perf fix: probing used to be sequential,
+    so total latency was the SUM of every runtime's probe time. These
+    tests make each probe artificially slow and assert the wall-clock
+    stays near the MAX (concurrent), not the SUM (serial).
+    """
+
+    def test_probes_run_concurrently(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from eurpe.api.routes.runtime import get_all_runtimes
+
+        probe_delay = 0.15
+        call_count = 0
+
+        def fake_probe_runtime(runtime_key: str, *, base_url: str | None = None) -> RuntimeStatus:
+            nonlocal call_count
+            call_count += 1
+            time.sleep(probe_delay)
+            info = RUNTIME_REGISTRY[runtime_key]
+            return RuntimeStatus(
+                name=info["display_name"],
+                endpoint=info["default_url"],
+                available=False,
+                error="unreachable in test",
+            )
+
+        monkeypatch.setattr(
+            "eurpe.config.load_config",
+            lambda: SimpleNamespace(models=SimpleNamespace(runtime="ollama", ollama_base_url=None)),
+        )
+        monkeypatch.setattr(
+            "eurpe.api.routes.runtime.probe_runtime",
+            fake_probe_runtime,
+        )
+
+        started = time.monotonic()
+        result = get_all_runtimes()
+        elapsed = time.monotonic() - started
+
+        assert call_count == len(RUNTIME_REGISTRY)
+        assert len(result.runtimes) == len(RUNTIME_REGISTRY)
+        # Serial probing would take call_count * probe_delay; concurrent
+        # probing should stay close to a single probe_delay.
+        assert elapsed < probe_delay * len(RUNTIME_REGISTRY)
+        assert result.active_runtime == "ollama"

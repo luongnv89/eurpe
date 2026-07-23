@@ -273,6 +273,81 @@ def test_ollama_client_model_property() -> None:
 
 
 # ---------------------------------------------------------------------------
+# _PooledHTTPClientMixin — connection reuse and close() lifecycle
+# ---------------------------------------------------------------------------
+
+
+def test_pooled_client_is_reused_across_calls() -> None:
+    c = OllamaLLMClient(base_url="http://localhost:11434", model="llama3.1:8b")
+    first = c._http_client()
+    second = c._http_client()
+    assert first is second
+
+
+def test_pooled_client_close_releases_and_resets() -> None:
+    c = OllamaLLMClient(base_url="http://localhost:11434", model="llama3.1:8b")
+    client = c._http_client()
+    assert not client.is_closed
+    c.close()
+    assert client.is_closed
+    assert c._pooled_client is None
+
+
+def test_pooled_client_close_is_idempotent() -> None:
+    c = OllamaLLMClient(base_url="http://localhost:11434", model="llama3.1:8b")
+    c._http_client()
+    c.close()
+    c.close()  # must not raise on a second call
+
+
+def test_pooled_client_close_before_use_is_a_noop() -> None:
+    c = OllamaLLMClient(base_url="http://localhost:11434", model="llama3.1:8b")
+    c.close()  # no client ever created; must not raise
+    assert c._pooled_client is None
+
+
+def test_pooled_client_concurrent_first_access_constructs_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Two concurrent first ``generate()`` calls must not each build a Client."""
+
+    import threading
+    import time
+
+    real_client_cls = httpx.Client
+    construction_count = 0
+    count_lock = threading.Lock()
+
+    def slow_client(*args: object, **kwargs: object) -> httpx.Client:
+        nonlocal construction_count
+        with count_lock:
+            construction_count += 1
+        time.sleep(0.05)
+        return real_client_cls(*args, **kwargs)
+
+    monkeypatch.setattr(httpx, "Client", slow_client)
+
+    c = OllamaLLMClient(base_url="http://localhost:11434", model="llama3.1:8b")
+    results: list[httpx.Client] = []
+    results_lock = threading.Lock()
+
+    def worker() -> None:
+        client = c._http_client()
+        with results_lock:
+            results.append(client)
+
+    threads = [threading.Thread(target=worker) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=5)
+
+    assert construction_count == 1
+    assert len({id(r) for r in results}) == 1
+    c.close()
+
+
+# ---------------------------------------------------------------------------
 # make_llm_client factory
 # ---------------------------------------------------------------------------
 
