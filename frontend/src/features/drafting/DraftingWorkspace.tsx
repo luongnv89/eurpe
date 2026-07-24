@@ -794,7 +794,7 @@ export function DraftingWorkspace() {
       {draft && (
         <section
           aria-labelledby="generated-draft-heading"
-          aria-busy={refining}
+          aria-busy={refining || generating}
           className="space-y-4"
         >
           <div className="flex flex-wrap items-end justify-between gap-3">
@@ -823,6 +823,7 @@ export function DraftingWorkspace() {
                   Iteration {currentIteration} of {effectiveMaxIterations}
                   {accepted && " — accepted"}
                   {stoppedAtCap && !accepted && " — iteration cap reached"}
+                  {generating && " — regenerating, preview below is the previous draft"}
                 </span>
               </div>
             </div>
@@ -872,7 +873,12 @@ export function DraftingWorkspace() {
               </AlertDescription>
             </Alert>
           )}
-          <DraftPreview draft={draft} />
+          <div
+            className={cn("transition-opacity", generating && "opacity-50")}
+            title={generating ? "Regenerating — this preview still shows the previous draft" : undefined}
+          >
+            <DraftPreview draft={draft} />
+          </div>
         </section>
       )}
       </div>

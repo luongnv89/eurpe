@@ -127,7 +127,11 @@ export function SettingsPage() {
   const [loadingConfig, setLoadingConfig] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
+  // "saved-stale" covers a save that succeeded on the server but whose
+  // response was discarded (see formUnchanged below) because the form
+  // changed mid-request — the user still needs to know the save landed
+  // and that their newer edits are not yet persisted.
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saved" | "saved-stale">("idle");
   const [allRuntimes, setAllRuntimes] = useState<AllRuntimesResponse | null>(null);
   const [loadingRuntimes, setLoadingRuntimes] = useState(true);
   const [instructions, setInstructions] = useState<Record<string, InstallInstructions>>({});
@@ -227,7 +231,7 @@ export function SettingsPage() {
     const formAtSave = form;
     setSaving(true);
     setError(null);
-    setSaved(false);
+    setSaveStatus("idle");
     try {
       const resp = await updateConfig({
         corpus_path: form.corpus_path,
@@ -247,15 +251,19 @@ export function SettingsPage() {
       });
       // Only rehydrate from the server echo if the form is untouched —
       // otherwise keystrokes typed while the save round-trip was in
-      // flight would be silently reverted. The "Configuration saved"
-      // banner follows the same guard: if concurrent edits were
-      // detected and the echo was discarded, the visible (unsaved)
-      // edits were not actually persisted, so don't claim they were.
+      // flight would be silently reverted. The saved-confirmation banner
+      // follows the same guard: if concurrent edits were detected and the
+      // echo was discarded, the visible (unsaved) edits were not what got
+      // persisted — so tell the user that explicitly instead of staying
+      // silent, which reads as "nothing happened" even though the PUT
+      // that was in flight did succeed.
       const formUnchanged = formRef.current === formAtSave;
       setForm((current) => (current === formAtSave ? formFromConfig(resp.config) : current));
-      if (formUnchanged) setSaved(true);
+      setSaveStatus(formUnchanged ? "saved" : "saved-stale");
       await loadRuntimes();
-      if (formUnchanged) setTimeout(() => setSaved(false), 3000);
+      if (formUnchanged) {
+        setTimeout(() => setSaveStatus((s) => (s === "saved" ? "idle" : s)), 3000);
+      }
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed to save configuration");
     } finally {
@@ -323,12 +331,24 @@ export function SettingsPage() {
           </Alert>
         )}
 
-        {saved && (
+        {saveStatus === "saved" && (
           <Alert className="border-green-200 bg-green-50">
             <Check className="h-4 w-4 text-green-600" />
             <AlertTitle className="text-green-800">Configuration saved</AlertTitle>
             <AlertDescription className="text-green-700">
               Changes have been written to config.yaml.
+            </AlertDescription>
+          </Alert>
+        )}
+
+        {saveStatus === "saved-stale" && (
+          <Alert className="border-amber-200 bg-amber-50">
+            <Check className="h-4 w-4 text-amber-600" />
+            <AlertTitle className="text-amber-800">Configuration saved</AlertTitle>
+            <AlertDescription className="text-amber-700">
+              Your changes were written to config.yaml, but the form has been edited since
+              then — those newer edits are not saved yet. Click Save Configuration again to
+              persist them.
             </AlertDescription>
           </Alert>
         )}
@@ -567,7 +587,10 @@ export function SettingsPage() {
             <RefreshCw className="mr-1 h-4 w-4" />
             Reload
           </Button>
-          <Button onClick={handleSave} disabled={saving}>
+          {/* Mirror image of the Reload-disabled-during-Save guard above:
+              a Reload GET in flight can land after a fresh Save PUT and
+              revert the just-saved state, so block Save until it settles. */}
+          <Button onClick={handleSave} disabled={saving || loadingConfig}>
             {saving ? (
               <>
                 <Loader2 className="mr-1 h-4 w-4 animate-spin" />
