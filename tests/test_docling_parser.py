@@ -13,6 +13,8 @@ Split into two layers:
 
 from __future__ import annotations
 
+import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -231,6 +233,76 @@ def test_parse_real_pdf_returns_parsed_proposal(tmp_path: Path) -> None:
     assert parsed.total_text_length() > 0
     # Source path must round-trip to the absolute form Docling was given.
     assert parsed.source_path == str(pdf_path.resolve())
+
+
+@pytest.mark.docling
+def test_concurrent_parse_constructs_converter_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression coverage for the ``_converter_lock`` double-checked lock.
+
+    Mirrors the concurrency tests added for the ``dependencies.py`` cache
+    lock and the LLM client pooled-connection lock: makes
+    ``DocumentConverter`` construction artificially slow, then hammers a
+    single shared parser instance with concurrent ``parse()`` calls. If
+    the lock were missing, several threads would race past the unlocked
+    ``self._converter is None`` check and each build their own
+    ``DocumentConverter``.
+
+    ``DocumentConverter.convert`` is stubbed to raise immediately so the
+    test exercises only the construction race — Docling's own
+    thread-safety for concurrent conversions *on one instance* is out of
+    scope here.
+    """
+
+    from docling.document_converter import DocumentConverter
+
+    pdf_path = tmp_path / "synthetic.pdf"
+    pdf_path.write_bytes(b"%PDF-1.4 stub")  # never actually parsed
+
+    real_init = DocumentConverter.__init__
+    construction_count = 0
+    construction_ids: set[int] = set()
+    count_lock = threading.Lock()
+
+    def slow_init(self, *args: object, **kwargs: object) -> None:
+        nonlocal construction_count
+        with count_lock:
+            construction_count += 1
+            construction_ids.add(id(self))
+        time.sleep(0.05)
+        real_init(self, *args, **kwargs)
+
+    class _StopConversion(Exception):
+        pass
+
+    def stub_convert(self, *_args: object, **_kwargs: object):
+        raise _StopConversion("conversion intentionally short-circuited for the lock test")
+
+    monkeypatch.setattr(DocumentConverter, "__init__", slow_init)
+    monkeypatch.setattr(DocumentConverter, "convert", stub_convert)
+
+    parser = DoclingProposalParser()
+    errors: list[ParserError] = []
+    errors_lock = threading.Lock()
+
+    def worker() -> None:
+        try:
+            parser.parse(pdf_path)
+        except ParserError as exc:
+            with errors_lock:
+                errors.append(exc)
+
+    threads = [threading.Thread(target=worker) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=10)
+
+    assert construction_count == 1
+    assert len(construction_ids) == 1
+    assert len(errors) == 8
+    assert all(isinstance(exc.cause, _StopConversion) for exc in errors)
 
 
 @pytest.mark.docling

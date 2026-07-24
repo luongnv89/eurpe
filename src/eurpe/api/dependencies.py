@@ -24,6 +24,7 @@ is never exercised in the fast tier — every test gets a fresh stub.
 
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 
 from fastapi import Depends
@@ -61,6 +62,16 @@ _index_cache: dict[tuple[str, str], ChromaIndex] = {}
 _token_store_cache: dict[str, ParseTokenStore] = {}
 _generation_service_cache: dict[tuple[str, str], GenerationService] = {}
 
+# FastAPI runs these sync providers on threadpool threads, so two
+# concurrent cold-start requests could otherwise both miss a cache and
+# both construct the singleton — for ChromaIndex that means a duplicate
+# ``chromadb.PersistentClient`` on the same on-disk path (OS file
+# locks). One lock covers every cache: misses are rare (first request
+# per config) and construction under the lock is what we want anyway.
+# Reentrant because ``get_generation_service`` calls ``get_index``
+# while holding it.
+_cache_lock = threading.RLock()
+
 # The configuration path used by every provider. Tests can override this
 # by clearing the caches and writing their own config — see
 # ``reset_dependency_caches`` below.
@@ -81,19 +92,49 @@ def set_config_path(config_path: Path) -> None:
     reset_dependency_caches()
 
 
+def close_llm_clients() -> None:
+    """Release the pooled ``httpx.Client`` held by every cached LLM client.
+
+    Cloud/Ollama clients built through :func:`make_llm_client` keep one
+    ``httpx.Client`` alive for the process lifetime (see
+    ``_PooledHTTPClientMixin``). ``DeterministicLLMClient`` has no such
+    resource, hence the ``getattr`` guard rather than an unconditional
+    ``.close()`` call.
+
+    Holds ``_cache_lock`` while iterating: without it, a concurrent
+    ``get_generation_service()`` cold-start could mutate
+    ``_generation_service_cache`` (under the same lock) while this
+    function iterates it, or hand back a service whose client this
+    function has already started closing.
+    """
+
+    with _cache_lock:
+        for service in _generation_service_cache.values():
+            close = getattr(service.workflow.llm, "close", None)
+            if close is not None:
+                close()
+
+
 def reset_dependency_caches() -> None:
     """Drop every cached singleton so the next request rebuilds from disk.
 
     Tests call this in their teardown so cross-test state cannot leak
     (especially the open Chroma client, which holds a file lock).
+
+    Holds ``_cache_lock`` for the same reason as :func:`close_llm_clients`
+    — clearing the dicts while a locked provider call is mid-construction
+    would otherwise let that call repopulate a cache entry this function
+    is about to drop, or clear out from under it.
     """
 
-    _config_cache.clear()
-    _parser_cache.clear()
-    _chunker_cache.clear()
-    _index_cache.clear()
-    _token_store_cache.clear()
-    _generation_service_cache.clear()
+    with _cache_lock:
+        close_llm_clients()
+        _config_cache.clear()
+        _parser_cache.clear()
+        _chunker_cache.clear()
+        _index_cache.clear()
+        _token_store_cache.clear()
+        _generation_service_cache.clear()
 
 
 def get_config() -> EurpeConfig:
@@ -109,11 +150,15 @@ def get_config() -> EurpeConfig:
     cached = _config_cache.get(key)
     if cached is not None:
         return cached
-    used_path = ensure_config_file(_CONFIG_PATH, EXAMPLE_CONFIG_PATH)
-    cfg = load_config(used_path).resolve_paths()
-    ensure_runtime_dirs(cfg)
-    _config_cache[key] = cfg
-    return cfg
+    with _cache_lock:
+        cached = _config_cache.get(key)
+        if cached is not None:
+            return cached
+        used_path = ensure_config_file(_CONFIG_PATH, EXAMPLE_CONFIG_PATH)
+        cfg = load_config(used_path).resolve_paths()
+        ensure_runtime_dirs(cfg)
+        _config_cache[key] = cfg
+        return cfg
 
 
 def get_parser(cfg: EurpeConfig = Depends(get_config)) -> DoclingProposalParser:
@@ -130,9 +175,13 @@ def get_parser(cfg: EurpeConfig = Depends(get_config)) -> DoclingProposalParser:
     cached = _parser_cache.get(key)
     if cached is not None:
         return cached
-    parser = DoclingProposalParser(offline=cfg.offline_mode)
-    _parser_cache[key] = parser
-    return parser
+    with _cache_lock:
+        cached = _parser_cache.get(key)
+        if cached is not None:
+            return cached
+        parser = DoclingProposalParser(offline=cfg.offline_mode)
+        _parser_cache[key] = parser
+        return parser
 
 
 def get_chunker(cfg: EurpeConfig = Depends(get_config)) -> HierarchicalChunker:
@@ -151,9 +200,13 @@ def get_chunker(cfg: EurpeConfig = Depends(get_config)) -> HierarchicalChunker:
     cached = _chunker_cache.get(key)
     if cached is not None:
         return cached
-    chunker = HierarchicalChunker()
-    _chunker_cache[key] = chunker
-    return chunker
+    with _cache_lock:
+        cached = _chunker_cache.get(key)
+        if cached is not None:
+            return cached
+        chunker = HierarchicalChunker()
+        _chunker_cache[key] = chunker
+        return chunker
 
 
 def get_index(
@@ -177,14 +230,18 @@ def get_index(
     cached = _index_cache.get(key)
     if cached is not None:
         return cached
-    embedder = make_embedder(cfg)
-    index = ChromaIndex(
-        index_path=cfg.index_path,
-        embedder=embedder,
-        collection_name=collection,
-    )
-    _index_cache[key] = index
-    return index
+    with _cache_lock:
+        cached = _index_cache.get(key)
+        if cached is not None:
+            return cached
+        embedder = make_embedder(cfg)
+        index = ChromaIndex(
+            index_path=cfg.index_path,
+            embedder=embedder,
+            collection_name=collection,
+        )
+        _index_cache[key] = index
+        return index
 
 
 def get_token_store(cfg: EurpeConfig = Depends(get_config)) -> ParseTokenStore:
@@ -194,9 +251,13 @@ def get_token_store(cfg: EurpeConfig = Depends(get_config)) -> ParseTokenStore:
     cached = _token_store_cache.get(key)
     if cached is not None:
         return cached
-    store = ParseTokenStore(cfg.runtime_dir)
-    _token_store_cache[key] = store
-    return store
+    with _cache_lock:
+        cached = _token_store_cache.get(key)
+        if cached is not None:
+            return cached
+        store = ParseTokenStore(cfg.runtime_dir)
+        _token_store_cache[key] = store
+        return store
 
 
 def get_generation_service(
@@ -230,12 +291,22 @@ def get_generation_service(
     if cached is not None:
         return cached
 
-    embedder = make_embedder(cfg)
-    index = ChromaIndex(
-        index_path=cfg.index_path,
-        embedder=embedder,
-        collection_name=collection,
-    )
+    with _cache_lock:
+        cached = _generation_service_cache.get(key)
+        if cached is not None:
+            return cached
+        return _build_generation_service(cfg, collection=collection, key=key)
+
+
+def _build_generation_service(
+    cfg: EurpeConfig,
+    *,
+    collection: str,
+    key: tuple[str, str],
+) -> GenerationService:
+    # Reuse the cached ChromaIndex rather than opening a second
+    # PersistentClient (and embedder) on the same on-disk path.
+    index = get_index(cfg, collection=collection)
     # ``relevance_threshold=0.0`` mirrors the deterministic_workflow
     # fixture used in the service tests; with the production
     # SentenceTransformer fallback the threshold rarely matters because

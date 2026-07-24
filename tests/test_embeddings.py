@@ -9,13 +9,18 @@ model-name check.
 
 We deliberately do NOT test ``OllamaEmbedder.embed`` against a live
 daemon — that would require a network or a local Ollama install in CI.
-A future integration suite (out of scope for issue #4) can cover it.
+A future integration suite (out of scope for issue #4) can cover that.
+The batching/validation logic in ``embed`` itself (multi-batch requests,
+batch-count mismatches, per-item dimension checks) is covered below
+against a mocked ``httpx.Client``, the same technique ``test_llm.py``
+uses for ``OllamaLLMClient``.
 """
 
 from __future__ import annotations
 
 import math
 
+import httpx
 import pytest
 
 from eurpe.config import EurpeConfig, ModelsConfig
@@ -127,6 +132,109 @@ def test_ollama_embedder_strips_trailing_slash_from_base_url() -> None:
     # Internal-state assertion is fine here — it's the surface that
     # would otherwise produce a double slash on ``/api/embeddings``.
     assert e._base_url == "http://localhost:11434"
+
+
+# ---------------------------------------------------------------------------
+# OllamaEmbedder.embed — batching, exercised against an httpx MockTransport
+#
+# These mock ``httpx.Client`` at module level (same technique as
+# ``test_llm.py``'s ``OllamaLLMClient`` tests), so they need neither a
+# network nor a local Ollama install.
+# ---------------------------------------------------------------------------
+
+
+class _FakeEmbedClient:
+    """Records every ``/api/embed`` POST and replays canned responses."""
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        self.calls: list[list[str]] = []
+
+    def __enter__(self) -> _FakeEmbedClient:
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        return None
+
+    def post(self, url: str, *, json: dict[str, object]) -> httpx.Response:
+        batch = json["input"]
+        assert isinstance(batch, list)
+        self.calls.append(batch)
+        return httpx.Response(
+            status_code=200,
+            json={"embeddings": self._embeddings_for(batch)},
+            request=httpx.Request("POST", url),
+        )
+
+    def _embeddings_for(self, batch: list[str]) -> list[list[float]]:
+        raise NotImplementedError
+
+
+def test_ollama_embedder_batches_requests_across_multiple_calls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """More texts than ``BATCH_SIZE`` must span more than one POST, in order."""
+
+    monkeypatch.setattr(OllamaEmbedder, "BATCH_SIZE", 2)
+    embedder = OllamaEmbedder(model="all-minilm", base_url="http://localhost:11434")
+
+    class _Client(_FakeEmbedClient):
+        def _embeddings_for(self, batch: list[str]) -> list[list[float]]:
+            return [[float(i)] * embedder.dimension for i in range(len(batch))]
+
+    client = _Client()
+    monkeypatch.setattr(
+        "eurpe.retrieval.embeddings.httpx.Client",
+        lambda *a, **k: client,
+    )
+
+    texts = ["a", "b", "c", "d", "e"]
+    out = embedder.embed(texts)
+
+    assert client.calls == [["a", "b"], ["c", "d"], ["e"]]
+    assert len(out) == len(texts)
+    assert all(len(vec) == embedder.dimension for vec in out)
+
+
+def test_ollama_embedder_batch_count_mismatch_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Fewer embeddings back than texts sent must raise, not silently misalign."""
+
+    embedder = OllamaEmbedder(model="all-minilm", base_url="http://localhost:11434")
+
+    class _Client(_FakeEmbedClient):
+        def _embeddings_for(self, batch: list[str]) -> list[list[float]]:
+            return [[0.0] * embedder.dimension for _ in range(len(batch) - 1)]
+
+    monkeypatch.setattr(
+        "eurpe.retrieval.embeddings.httpx.Client",
+        lambda *a, **k: _Client(),
+    )
+
+    with pytest.raises(EmbeddingError, match="malformed embedding payload"):
+        embedder.embed(["x", "y"])
+
+
+def test_ollama_embedder_wrong_dimension_item_in_multi_item_batch_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A single bad-dimension item inside a >1-item batch must still be caught."""
+
+    embedder = OllamaEmbedder(model="all-minilm", base_url="http://localhost:11434")
+
+    class _Client(_FakeEmbedClient):
+        def _embeddings_for(self, batch: list[str]) -> list[list[float]]:
+            good = [0.0] * embedder.dimension
+            wrong = [0.0] * (embedder.dimension - 1)
+            return [good, wrong]
+
+    monkeypatch.setattr(
+        "eurpe.retrieval.embeddings.httpx.Client",
+        lambda *a, **k: _Client(),
+    )
+
+    with pytest.raises(EmbeddingError, match="Embedding dim mismatch"):
+        embedder.embed(["x", "y"])
 
 
 # ---------------------------------------------------------------------------

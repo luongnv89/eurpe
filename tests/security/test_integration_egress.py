@@ -3,7 +3,7 @@
 The four sites:
 
 1. ``eurpe.retrieval.embeddings.OllamaEmbedder.embed`` → POST to
-   ``/api/embeddings``.
+   ``/api/embed``.
 2. ``eurpe.retrieval.embeddings._ollama_reachable`` → TCP probe used
    by ``make_embedder`` to choose the fallback.
 3. ``eurpe.generation.llm.OllamaLLMClient.generate`` → POST to
@@ -96,7 +96,7 @@ def test_ollama_embedder_allows_loopback_via_gate(
         @staticmethod
         def json() -> dict:
             # Match the 768-d nomic-embed-text dimension.
-            return {"embedding": [0.0] * 768}
+            return {"embeddings": [[0.0] * 768]}
 
     class _FakeClient:
         def __init__(self, *_, **__) -> None:
@@ -143,7 +143,7 @@ def test_ollama_embedder_allows_allowlisted_host(
 
         @staticmethod
         def json() -> dict:
-            return {"embedding": [0.1] * 768}
+            return {"embeddings": [[0.1] * 768]}
 
     class _FakeClient:
         def __init__(self, *_, **__) -> None:
@@ -320,7 +320,7 @@ def test_no_policy_means_backward_compatible(monkeypatch: pytest.MonkeyPatch) ->
 
         @staticmethod
         def json() -> dict:
-            return {"embedding": [0.0] * 768}
+            return {"embeddings": [[0.0] * 768]}
 
     class _FakeClient:
         def __init__(self, *_, **__) -> None:

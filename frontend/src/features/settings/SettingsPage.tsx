@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   AlertCircle,
   Check,
@@ -127,29 +127,61 @@ export function SettingsPage() {
   const [loadingConfig, setLoadingConfig] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
+  // "saved-stale" covers a save that succeeded on the server but whose
+  // response was discarded (see formUnchanged below) because the form
+  // changed mid-request — the user still needs to know the save landed
+  // and that their newer edits are not yet persisted.
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saved" | "saved-stale">("idle");
   const [allRuntimes, setAllRuntimes] = useState<AllRuntimesResponse | null>(null);
   const [loadingRuntimes, setLoadingRuntimes] = useState(true);
   const [instructions, setInstructions] = useState<Record<string, InstallInstructions>>({});
   const [expandedRuntime, setExpandedRuntime] = useState<string | null>(null);
 
+  // Request-id guards: two Reloads (or two runtime-probe refreshes) can
+  // each start a fetch while an older one of the same kind is still in
+  // flight (unreachable runtime probes take seconds to time out), and
+  // responses can land out of arrival order — without the guard a
+  // slower, staler response overwrites the newer state. This only
+  // covers same-kind races. Reload vs. Save is a separate race (a GET
+  // issued mid-save can return the pre-save server state and revert the
+  // form even though the PUT goes on to persist); the Reload button is
+  // disabled while `saving` is true to close that gap instead.
+  const configReqIdRef = useRef(0);
+  const runtimesReqIdRef = useRef(0);
+
+  // Mirrors `form` outside the render/commit cycle so handleSave can tell,
+  // after its await, whether the form is still the exact snapshot it saved.
+  const formRef = useRef<SettingsForm | null>(null);
+  useEffect(() => {
+    formRef.current = form;
+  }, [form]);
+
   const loadConfig = useCallback(async () => {
+    const reqId = ++configReqIdRef.current;
     setLoadingConfig(true);
     setError(null);
     try {
       const cfg = await fetchConfig();
+      if (reqId !== configReqIdRef.current) return;
       setForm(formFromConfig(cfg));
+      // A reload discards whatever the "saved-stale" banner was asking the
+      // user to re-save — those edits are gone now, so the banner's call to
+      // action ("click Save again") no longer applies.
+      setSaveStatus("idle");
     } catch (e: unknown) {
+      if (reqId !== configReqIdRef.current) return;
       setError(e instanceof Error ? e.message : "Failed to load configuration");
     } finally {
-      setLoadingConfig(false);
+      if (reqId === configReqIdRef.current) setLoadingConfig(false);
     }
   }, []);
 
   const loadRuntimes = useCallback(async () => {
+    const reqId = ++runtimesReqIdRef.current;
     setLoadingRuntimes(true);
     try {
       const data = await fetchAllRuntimes();
+      if (reqId !== runtimesReqIdRef.current) return;
       setAllRuntimes(data);
 
       const instMap: Record<string, InstallInstructions> = {};
@@ -165,11 +197,12 @@ export function SettingsPage() {
             }
           }),
       );
+      if (reqId !== runtimesReqIdRef.current) return;
       setInstructions(instMap);
     } catch {
       // Runtime diagnostics are supplementary; config editing still works.
     } finally {
-      setLoadingRuntimes(false);
+      if (reqId === runtimesReqIdRef.current) setLoadingRuntimes(false);
     }
   }, []);
 
@@ -199,9 +232,10 @@ export function SettingsPage() {
 
   const handleSave = async () => {
     if (!form) return;
+    const formAtSave = form;
     setSaving(true);
     setError(null);
-    setSaved(false);
+    setSaveStatus("idle");
     try {
       const resp = await updateConfig({
         corpus_path: form.corpus_path,
@@ -219,10 +253,28 @@ export function SettingsPage() {
         },
         network_allowlist: form.network_allowlist,
       });
-      setForm(formFromConfig(resp.config));
-      setSaved(true);
+      // Only rehydrate from the server echo if the form is untouched —
+      // otherwise keystrokes typed while the save round-trip was in
+      // flight would be silently reverted. The saved-confirmation banner
+      // follows the same guard: if concurrent edits were detected and the
+      // echo was discarded, the visible (unsaved) edits were not what got
+      // persisted — so tell the user that explicitly instead of staying
+      // silent, which reads as "nothing happened" even though the PUT
+      // that was in flight did succeed.
+      //
+      // Reference equality (rather than a structural/value comparison) is
+      // safe here only because the Save button is disabled while `saving`
+      // is true, so a second handleSave can never start before this one's
+      // own server-echo setForm call changes the object identity. If Save
+      // is ever allowed to run concurrently, this needs a value comparison
+      // instead.
+      const formUnchanged = formRef.current === formAtSave;
+      setForm((current) => (current === formAtSave ? formFromConfig(resp.config) : current));
+      setSaveStatus(formUnchanged ? "saved" : "saved-stale");
       await loadRuntimes();
-      setTimeout(() => setSaved(false), 3000);
+      if (formUnchanged) {
+        setTimeout(() => setSaveStatus((s) => (s === "saved" ? "idle" : s)), 3000);
+      }
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed to save configuration");
     } finally {
@@ -290,12 +342,24 @@ export function SettingsPage() {
           </Alert>
         )}
 
-        {saved && (
+        {saveStatus === "saved" && (
           <Alert className="border-green-200 bg-green-50">
             <Check className="h-4 w-4 text-green-600" />
             <AlertTitle className="text-green-800">Configuration saved</AlertTitle>
             <AlertDescription className="text-green-700">
               Changes have been written to config.yaml.
+            </AlertDescription>
+          </Alert>
+        )}
+
+        {saveStatus === "saved-stale" && (
+          <Alert className="border-amber-200 bg-amber-50">
+            <Check className="h-4 w-4 text-amber-600" />
+            <AlertTitle className="text-amber-800">Configuration saved</AlertTitle>
+            <AlertDescription className="text-amber-700">
+              Your changes were written to config.yaml, but the form has been edited since
+              then — those newer edits are not saved yet. Click Save Configuration again to
+              persist them.
             </AlertDescription>
           </Alert>
         )}
@@ -530,11 +594,20 @@ export function SettingsPage() {
         </Card>
 
         <div className="flex items-center justify-end gap-3">
-          <Button variant="outline" onClick={loadConfig}>
-            <RefreshCw className="mr-1 h-4 w-4" />
+          <Button variant="outline" onClick={loadConfig} disabled={saving}>
+            <RefreshCw
+              className={`mr-1 h-4 w-4 ${loadingConfig ? "animate-spin" : ""}`}
+            />
             Reload
           </Button>
-          <Button onClick={handleSave} disabled={saving}>
+          {/* Mirror image of the Reload-disabled-during-Save guard above:
+              a Reload GET in flight can land after a fresh Save PUT and
+              revert the just-saved state, so block Save until it settles. */}
+          <Button
+            onClick={handleSave}
+            disabled={saving || loadingConfig}
+            title={loadingConfig ? "Waiting for configuration to finish reloading…" : undefined}
+          >
             {saving ? (
               <>
                 <Loader2 className="mr-1 h-4 w-4 animate-spin" />

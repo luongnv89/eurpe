@@ -42,6 +42,7 @@ import logging
 import os
 import re
 import socket
+import threading
 from typing import Protocol
 from urllib.parse import urlparse
 
@@ -160,12 +161,63 @@ class LLMClient(Protocol):
         """Return the model's text completion of ``prompt``."""
 
 
+# Guards lazy pooled-client construction (mirrors
+# DoclingProposalParser._converter_lock): an unguarded check-then-set
+# would let two concurrent first calls on the same cached LLM-client
+# singleton each build a Client, orphaning one. Shared across
+# instances/subclasses since creation is rare and cheap — it only
+# serializes the one-time construction, not actual request traffic.
+_pooled_client_creation_lock = threading.Lock()
+
+
+class _PooledHTTPClientMixin:
+    """One reusable ``httpx.Client`` per LLM client instance.
+
+    A fresh ``httpx.Client`` per ``generate()`` call means a fresh TCP
+    (and, for cloud providers, TLS) handshake per request — the critic
+    loop makes up to 10 LLM calls per draft, so connection reuse
+    matters. Created lazily so tests that monkeypatch ``httpx.Client``
+    after constructing the LLM client still get the fake.
+    """
+
+    _timeout: float
+    _pooled_client: httpx.Client | None = None
+
+    def _http_client(self) -> httpx.Client:
+        client = self._pooled_client
+        if client is None:
+            with _pooled_client_creation_lock:
+                client = self._pooled_client
+                if client is None:
+                    client = httpx.Client(timeout=self._timeout)
+                    self._pooled_client = client
+        return client
+
+    def close(self) -> None:
+        """Release the pooled connection; safe to call more than once.
+
+        Not synchronized against a concurrent in-flight ``generate()``:
+        if ``close()`` runs while a request is mid-``post()``, httpx
+        raises ``RuntimeError("... client has been closed.")`` from the
+        send. Every ``generate()`` implementation includes ``RuntimeError``
+        in its connection-failure catch so that lands as
+        :class:`~eurpe.generation.errors.LLMUnavailableError` (matching
+        the treatment of a dead connection) rather than an unhandled
+        500. This is a shutdown/test-reset timing window, not a
+        steady-state request-handling concern.
+        """
+
+        if self._pooled_client is not None:
+            self._pooled_client.close()
+            self._pooled_client = None
+
+
 # ---------------------------------------------------------------------------
 # Ollama client (real model, talks to localhost)
 # ---------------------------------------------------------------------------
 
 
-class OllamaLLMClient:
+class OllamaLLMClient(_PooledHTTPClientMixin):
     """LLM client backed by a local Ollama daemon (``POST /api/generate``).
 
     Talks to ``localhost:11434`` by default — what a developer machine
@@ -256,9 +308,8 @@ class OllamaLLMClient:
                 source="ollama_llm.generate",
             )
         try:
-            with httpx.Client(timeout=self._timeout) as client:
-                resp = client.post(url, json=body)
-        except (httpx.ConnectError, httpx.ReadTimeout, httpx.ConnectTimeout) as exc:
+            resp = self._http_client().post(url, json=body)
+        except (httpx.ConnectError, httpx.ReadTimeout, httpx.ConnectTimeout, RuntimeError) as exc:
             # Connection-level failures are recoverable by the user
             # ("start ollama serve") — surface a distinct error type
             # so the CLI can print an actionable message.
@@ -301,7 +352,7 @@ class OllamaLLMClient:
 # ---------------------------------------------------------------------------
 
 
-class OpenAICompatibleLLMClient:
+class OpenAICompatibleLLMClient(_PooledHTTPClientMixin):
     """LLM client for providers exposing ``/chat/completions``.
 
     Covers OpenAI, OpenRouter, Groq, LM Studio, vLLM, and llama.cpp.
@@ -369,9 +420,8 @@ class OpenAICompatibleLLMClient:
         )
 
         try:
-            with httpx.Client(timeout=self._timeout) as client:
-                resp = client.post(url, json=body, headers=headers)
-        except (httpx.ConnectError, httpx.ReadTimeout, httpx.ConnectTimeout) as exc:
+            resp = self._http_client().post(url, json=body, headers=headers)
+        except (httpx.ConnectError, httpx.ReadTimeout, httpx.ConnectTimeout, RuntimeError) as exc:
             raise LLMUnavailableError(
                 f"Cannot reach {self._provider} LLM endpoint at {self._base_url}: {exc}."
             ) from exc
@@ -418,7 +468,7 @@ class OpenAICompatibleLLMClient:
         return completion
 
 
-class AnthropicLLMClient:
+class AnthropicLLMClient(_PooledHTTPClientMixin):
     """LLM client for Anthropic's Messages API."""
 
     def __init__(
@@ -474,9 +524,8 @@ class AnthropicLLMClient:
         )
 
         try:
-            with httpx.Client(timeout=self._timeout) as client:
-                resp = client.post(url, json=body, headers=headers)
-        except (httpx.ConnectError, httpx.ReadTimeout, httpx.ConnectTimeout) as exc:
+            resp = self._http_client().post(url, json=body, headers=headers)
+        except (httpx.ConnectError, httpx.ReadTimeout, httpx.ConnectTimeout, RuntimeError) as exc:
             raise LLMUnavailableError(
                 f"Cannot reach Anthropic LLM endpoint at {self._base_url}: {exc}."
             ) from exc
@@ -512,7 +561,7 @@ class AnthropicLLMClient:
         return completion
 
 
-class GeminiLLMClient:
+class GeminiLLMClient(_PooledHTTPClientMixin):
     """LLM client for Google Gemini ``generateContent``."""
 
     def __init__(
@@ -566,9 +615,8 @@ class GeminiLLMClient:
         )
 
         try:
-            with httpx.Client(timeout=self._timeout) as client:
-                resp = client.post(url, json=body, headers=headers)
-        except (httpx.ConnectError, httpx.ReadTimeout, httpx.ConnectTimeout) as exc:
+            resp = self._http_client().post(url, json=body, headers=headers)
+        except (httpx.ConnectError, httpx.ReadTimeout, httpx.ConnectTimeout, RuntimeError) as exc:
             raise LLMUnavailableError(
                 f"Cannot reach Gemini LLM endpoint at {self._base_url}: {exc}."
             ) from exc

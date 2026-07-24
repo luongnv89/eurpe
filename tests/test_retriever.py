@@ -100,6 +100,21 @@ class _StubIndex:
 
         return rows[:top_k]
 
+    def embed_query(self, query_text: str) -> str:
+        # The stub never inspects the vector, so the text itself works
+        # as the sentinel "embedding" passed back to query_by_vector.
+        return query_text
+
+    def query_by_vector(
+        self,
+        query_vec: str,
+        *,
+        top_k: int = 10,
+        where: dict[str, object] | None = None,
+    ) -> list[tuple[Chunk, float]]:
+        # Delegate so ``calls`` keeps recording one entry per fetch.
+        return self.query(query_vec, top_k=top_k, where=where)
+
 
 def _row_matches_where(chunk: Chunk, where: dict[str, object]) -> bool:
     """Tiny ``where`` evaluator — supports flat ``{key: value}`` and ``{$and: [...]}``."""

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { AlertCircle, CheckCircle2, Download, Loader2, RefreshCw, Sparkles } from "lucide-react";
 
@@ -215,6 +215,12 @@ export function DraftingWorkspace() {
     }
   }, [callUrl]);
 
+  // Guards against a stale generate/refine response landing after the
+  // operator has reset the form or started a new run: each mutation of
+  // draft state bumps the id, and in-flight responses whose id no
+  // longer matches are dropped instead of overwriting fresh state.
+  const draftRunIdRef = useRef(0);
+
   const handleGenerate = useCallback(async () => {
     const errors: string[] = [];
     if (!sectionType) errors.push("section type is required");
@@ -260,14 +266,21 @@ export function DraftingWorkspace() {
       lessons_learned: lessonsLearned,
     };
 
+    // A failed regenerate must not wipe a draft that was already there —
+    // the in-flight banner promises the prior draft is still shown below,
+    // so only clear it on failure when there was nothing to protect.
+    const hadPriorDraft = draft !== null;
+    const runId = ++draftRunIdRef.current;
     try {
       const result = await generateSection(body);
+      if (runId !== draftRunIdRef.current) return;
       setDraft(result);
     } catch (err) {
+      if (runId !== draftRunIdRef.current) return;
       setServerError(err instanceof Error ? err.message : String(err));
-      setDraft(null);
+      if (!hadPriorDraft) setDraft(null);
     } finally {
-      setGenerating(false);
+      if (runId === draftRunIdRef.current) setGenerating(false);
     }
   }, [
     sectionType,
@@ -280,6 +293,7 @@ export function DraftingWorkspace() {
     targetProgramme,
     profileProgramme,
     lessonsLearned,
+    draft,
   ]);
 
   const handleRefine = useCallback(async () => {
@@ -314,14 +328,17 @@ export function DraftingWorkspace() {
       prior_draft: draft,
     };
 
+    const runId = ++draftRunIdRef.current;
     try {
       const result = await iterateSection(body);
+      if (runId !== draftRunIdRef.current) return;
       setDraft(result.draft);
       setStoppedAtCap(result.stopped);
     } catch (err) {
+      if (runId !== draftRunIdRef.current) return;
       setServerError(err instanceof Error ? err.message : String(err));
     } finally {
-      setRefining(false);
+      if (runId === draftRunIdRef.current) setRefining(false);
     }
   }, [
     draft,
@@ -349,6 +366,11 @@ export function DraftingWorkspace() {
   }, []);
 
   function resetForm() {
+    // Invalidate any in-flight generate/refine so its late response
+    // cannot resurrect the draft we are about to clear.
+    draftRunIdRef.current++;
+    setGenerating(false);
+    setRefining(false);
     setSectionType("");
     setProfileProgramme(NONE_VALUE);
     setTargetProgramme(NONE_VALUE);
@@ -741,14 +763,18 @@ export function DraftingWorkspace() {
           )}
 
           <div className="flex flex-wrap items-center justify-end gap-2">
-            <Button type="button" variant="outline" onClick={resetForm} disabled={generating}>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={resetForm}
+            >
               Reset
             </Button>
             <Button
               type="button"
               variant="amber"
               onClick={() => void handleGenerate()}
-              disabled={generating}
+              disabled={generating || refining}
             >
               {generating ? (
                 <>
@@ -772,7 +798,7 @@ export function DraftingWorkspace() {
       {draft && (
         <section
           aria-labelledby="generated-draft-heading"
-          aria-busy={refining}
+          aria-busy={refining || generating}
           className="space-y-4"
         >
           <div className="flex flex-wrap items-end justify-between gap-3">
@@ -801,6 +827,7 @@ export function DraftingWorkspace() {
                   Iteration {currentIteration} of {effectiveMaxIterations}
                   {accepted && " — accepted"}
                   {stoppedAtCap && !accepted && " — iteration cap reached"}
+                  {generating && " — regenerating, preview below is the previous draft"}
                 </span>
               </div>
             </div>
@@ -812,7 +839,7 @@ export function DraftingWorkspace() {
                 type="button"
                 variant="outline"
                 onClick={handleAccept}
-                disabled={accepted || refining}
+                disabled={accepted || refining || generating}
                 aria-label="Accept this draft and stop the critic loop"
               >
                 <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
@@ -850,7 +877,12 @@ export function DraftingWorkspace() {
               </AlertDescription>
             </Alert>
           )}
-          <DraftPreview draft={draft} />
+          <div
+            className={cn("transition-opacity", generating && "opacity-50")}
+            title={generating ? "Regenerating — this preview still shows the previous draft" : undefined}
+          >
+            <DraftPreview draft={draft} />
+          </div>
         </section>
       )}
       </div>

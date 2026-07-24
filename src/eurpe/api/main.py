@@ -38,6 +38,7 @@ from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
 
 from eurpe import __version__
+from eurpe.api.dependencies import close_llm_clients
 from eurpe.api.routes import cloud_test as cloud_test_routes
 from eurpe.api.routes import config as config_routes
 from eurpe.api.routes import generate as generate_routes
@@ -51,7 +52,7 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
-    """Log the local-only invariant on startup; no shutdown hook needed.
+    """Log the local-only invariant on startup; close pooled clients on shutdown.
 
     Uvicorn prints the bind address itself so we don't try to second-guess
     it here — but the offline-mode + 127.0.0.1 expectation is worth a log
@@ -64,8 +65,9 @@ async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
         __version__,
     )
     yield
-    # No teardown work required: caches sit on the dependency module
-    # itself and survive a worker reload by design.
+    # The cached LLM clients' pooled httpx.Client connections would
+    # otherwise only close at process exit (see close_llm_clients).
+    close_llm_clients()
 
 
 app = FastAPI(
