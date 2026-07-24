@@ -64,6 +64,146 @@ def test_concurrent_get_config_constructs_singleton_once(
     assert len({id(r) for r in results}) == 1
 
 
+def test_concurrent_get_parser_constructs_singleton_once(
+    offline_config: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real_parser_cls = deps.DoclingProposalParser
+    construction_count = 0
+    count_lock = threading.Lock()
+
+    def slow_parser(*args, **kwargs):
+        nonlocal construction_count
+        with count_lock:
+            construction_count += 1
+        time.sleep(0.05)
+        return real_parser_cls(*args, **kwargs)
+
+    monkeypatch.setattr(deps, "DoclingProposalParser", slow_parser)
+
+    results: list[object] = []
+    results_lock = threading.Lock()
+
+    def worker() -> None:
+        parser = deps.get_parser(deps.get_config())
+        with results_lock:
+            results.append(parser)
+
+    threads = [threading.Thread(target=worker) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=5)
+
+    assert construction_count == 1
+    assert len(results) == 8
+    assert len({id(r) for r in results}) == 1
+
+
+def test_concurrent_get_chunker_constructs_singleton_once(
+    offline_config: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real_chunker_cls = deps.HierarchicalChunker
+    construction_count = 0
+    count_lock = threading.Lock()
+
+    def slow_chunker(*args, **kwargs):
+        nonlocal construction_count
+        with count_lock:
+            construction_count += 1
+        time.sleep(0.05)
+        return real_chunker_cls(*args, **kwargs)
+
+    monkeypatch.setattr(deps, "HierarchicalChunker", slow_chunker)
+
+    results: list[object] = []
+    results_lock = threading.Lock()
+
+    def worker() -> None:
+        chunker = deps.get_chunker(deps.get_config())
+        with results_lock:
+            results.append(chunker)
+
+    threads = [threading.Thread(target=worker) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=5)
+
+    assert construction_count == 1
+    assert len(results) == 8
+    assert len({id(r) for r in results}) == 1
+
+
+def test_concurrent_get_index_constructs_singleton_once(
+    offline_config: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real_index_cls = deps.ChromaIndex
+    construction_count = 0
+    count_lock = threading.Lock()
+
+    def slow_index(*args, **kwargs):
+        nonlocal construction_count
+        with count_lock:
+            construction_count += 1
+        time.sleep(0.05)
+        return real_index_cls(*args, **kwargs)
+
+    monkeypatch.setattr(deps, "ChromaIndex", slow_index)
+
+    results: list[object] = []
+    results_lock = threading.Lock()
+
+    def worker() -> None:
+        index = deps.get_index(deps.get_config())
+        with results_lock:
+            results.append(index)
+
+    threads = [threading.Thread(target=worker) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=5)
+
+    assert construction_count == 1
+    assert len(results) == 8
+    assert len({id(r) for r in results}) == 1
+
+
+def test_concurrent_get_token_store_constructs_singleton_once(
+    offline_config: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real_store_cls = deps.ParseTokenStore
+    construction_count = 0
+    count_lock = threading.Lock()
+
+    def slow_store(*args, **kwargs):
+        nonlocal construction_count
+        with count_lock:
+            construction_count += 1
+        time.sleep(0.05)
+        return real_store_cls(*args, **kwargs)
+
+    monkeypatch.setattr(deps, "ParseTokenStore", slow_store)
+
+    results: list[object] = []
+    results_lock = threading.Lock()
+
+    def worker() -> None:
+        store = deps.get_token_store(deps.get_config())
+        with results_lock:
+            results.append(store)
+
+    threads = [threading.Thread(target=worker) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=5)
+
+    assert construction_count == 1
+    assert len(results) == 8
+    assert len({id(r) for r in results}) == 1
+
+
 def test_concurrent_get_generation_service_constructs_singleton_once(
     offline_config: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

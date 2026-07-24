@@ -164,6 +164,10 @@ export function SettingsPage() {
       const cfg = await fetchConfig();
       if (reqId !== configReqIdRef.current) return;
       setForm(formFromConfig(cfg));
+      // A reload discards whatever the "saved-stale" banner was asking the
+      // user to re-save — those edits are gone now, so the banner's call to
+      // action ("click Save again") no longer applies.
+      setSaveStatus("idle");
     } catch (e: unknown) {
       if (reqId !== configReqIdRef.current) return;
       setError(e instanceof Error ? e.message : "Failed to load configuration");
@@ -257,6 +261,13 @@ export function SettingsPage() {
       // persisted — so tell the user that explicitly instead of staying
       // silent, which reads as "nothing happened" even though the PUT
       // that was in flight did succeed.
+      //
+      // Reference equality (rather than a structural/value comparison) is
+      // safe here only because the Save button is disabled while `saving`
+      // is true, so a second handleSave can never start before this one's
+      // own server-echo setForm call changes the object identity. If Save
+      // is ever allowed to run concurrently, this needs a value comparison
+      // instead.
       const formUnchanged = formRef.current === formAtSave;
       setForm((current) => (current === formAtSave ? formFromConfig(resp.config) : current));
       setSaveStatus(formUnchanged ? "saved" : "saved-stale");

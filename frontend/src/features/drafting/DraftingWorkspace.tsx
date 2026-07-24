@@ -266,6 +266,10 @@ export function DraftingWorkspace() {
       lessons_learned: lessonsLearned,
     };
 
+    // A failed regenerate must not wipe a draft that was already there —
+    // the in-flight banner promises the prior draft is still shown below,
+    // so only clear it on failure when there was nothing to protect.
+    const hadPriorDraft = draft !== null;
     const runId = ++draftRunIdRef.current;
     try {
       const result = await generateSection(body);
@@ -274,7 +278,7 @@ export function DraftingWorkspace() {
     } catch (err) {
       if (runId !== draftRunIdRef.current) return;
       setServerError(err instanceof Error ? err.message : String(err));
-      setDraft(null);
+      if (!hadPriorDraft) setDraft(null);
     } finally {
       if (runId === draftRunIdRef.current) setGenerating(false);
     }
@@ -289,6 +293,7 @@ export function DraftingWorkspace() {
     targetProgramme,
     profileProgramme,
     lessonsLearned,
+    draft,
   ]);
 
   const handleRefine = useCallback(async () => {
