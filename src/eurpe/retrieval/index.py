@@ -65,7 +65,14 @@ _NONE_MARKER = "__none__"
 #: Row cap for the dedup lookups. They reduce matching chunks to a
 #: handful of distinct ``anchor.document_id`` values (callers use only
 #: the first), so fetching every chunk of a matched proposal is waste.
-_DEDUP_FETCH_LIMIT = 50
+#: 500 comfortably covers even the largest realistic single proposal —
+#: the default chunker targets ~1200 chars/chunk (see
+#: ``HierarchicalChunker``), so a 100-page proposal lands around 200-300
+#: chunks — while still bounding the fetch. It remains a heuristic: a
+#: document with more chunks than this limit can still push a genuine
+#: conflicting document's rows outside the fetch window, masking a
+#: duplicate. Known, accepted tradeoff — see the dedup helpers below.
+_DEDUP_FETCH_LIMIT = 500
 
 
 def _metadata_to_chroma(meta: ChunkMetadata) -> dict[str, str | int | float | bool]:

@@ -133,11 +133,15 @@ export function SettingsPage() {
   const [instructions, setInstructions] = useState<Record<string, InstallInstructions>>({});
   const [expandedRuntime, setExpandedRuntime] = useState<string | null>(null);
 
-  // Request-id guards: Reload/Refresh/Save can each start a new fetch
-  // while an older one is still in flight (unreachable runtime probes
-  // take seconds to time out), and responses land in arrival order —
-  // without the guard a slower, staler response overwrites the newer
-  // state.
+  // Request-id guards: two Reloads (or two runtime-probe refreshes) can
+  // each start a fetch while an older one of the same kind is still in
+  // flight (unreachable runtime probes take seconds to time out), and
+  // responses can land out of arrival order — without the guard a
+  // slower, staler response overwrites the newer state. This only
+  // covers same-kind races. Reload vs. Save is a separate race (a GET
+  // issued mid-save can return the pre-save server state and revert the
+  // form even though the PUT goes on to persist); the Reload button is
+  // disabled while `saving` is true to close that gap instead.
   const configReqIdRef = useRef(0);
   const runtimesReqIdRef = useRef(0);
 
@@ -559,7 +563,7 @@ export function SettingsPage() {
         </Card>
 
         <div className="flex items-center justify-end gap-3">
-          <Button variant="outline" onClick={loadConfig}>
+          <Button variant="outline" onClick={loadConfig} disabled={saving}>
             <RefreshCw className="mr-1 h-4 w-4" />
             Reload
           </Button>
