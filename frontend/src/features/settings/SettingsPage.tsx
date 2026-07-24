@@ -584,13 +584,19 @@ export function SettingsPage() {
 
         <div className="flex items-center justify-end gap-3">
           <Button variant="outline" onClick={loadConfig} disabled={saving}>
-            <RefreshCw className="mr-1 h-4 w-4" />
+            <RefreshCw
+              className={`mr-1 h-4 w-4 ${loadingConfig ? "animate-spin" : ""}`}
+            />
             Reload
           </Button>
           {/* Mirror image of the Reload-disabled-during-Save guard above:
               a Reload GET in flight can land after a fresh Save PUT and
               revert the just-saved state, so block Save until it settles. */}
-          <Button onClick={handleSave} disabled={saving || loadingConfig}>
+          <Button
+            onClick={handleSave}
+            disabled={saving || loadingConfig}
+            title={loadingConfig ? "Waiting for configuration to finish reloading…" : undefined}
+          >
             {saving ? (
               <>
                 <Loader2 className="mr-1 h-4 w-4 animate-spin" />

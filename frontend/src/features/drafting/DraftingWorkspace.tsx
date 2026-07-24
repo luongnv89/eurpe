@@ -762,7 +762,6 @@ export function DraftingWorkspace() {
               type="button"
               variant="outline"
               onClick={resetForm}
-              disabled={generating}
             >
               Reset
             </Button>

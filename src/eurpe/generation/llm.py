@@ -184,11 +184,14 @@ class _PooledHTTPClientMixin:
     _pooled_client: httpx.Client | None = None
 
     def _http_client(self) -> httpx.Client:
-        if self._pooled_client is None:
+        client = self._pooled_client
+        if client is None:
             with _pooled_client_creation_lock:
-                if self._pooled_client is None:
-                    self._pooled_client = httpx.Client(timeout=self._timeout)
-        return self._pooled_client
+                client = self._pooled_client
+                if client is None:
+                    client = httpx.Client(timeout=self._timeout)
+                    self._pooled_client = client
+        return client
 
     def close(self) -> None:
         """Release the pooled connection; safe to call more than once.
